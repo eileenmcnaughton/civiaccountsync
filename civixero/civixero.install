@@ -1,0 +1,151 @@
+<?php
+// $Id$
+
+/**
+ * Implementation of hook_enable
+ */
+function civixero_enable() {
+    if (!module_exists('civiaccountsync')) {
+        drupal_set_message('Unable to register CiviXero, CiviAccountSync module not found.', 'error');
+        return;
+    }
+    civiaccountsync_register_plugin('civixero', t('Xero'), 'admin/cas/plugins/civixero');
+}
+/**
+ * Implementation of hook_disable
+ */
+function civixero_disable() {
+    if (!module_exists('civiaccountsync')) {
+        drupal_set_message('Unable to unregister CiviXero, CiviAccountSync module not found.', 'error');
+        return;
+    }
+    if (!civiaccountsync_unregister_plugin('civixero'))
+        drupal_set_message('Unable to unregister CiviXero, an unknown error occurred.', 'error');
+}
+
+/**
+ * Implementation of hook_install
+ */
+function civixero_install() {
+
+    // We need external_identifier field to be slightly longer than it is now, to store
+    // the contact IDs Xero produces (36 characters, whereas field is a varchar 32)
+    civicrm_initialize(true);
+    //CRM_Core_DAO::executeQuery("
+    //    ALTER TABLE civicrm_contact CHANGE external_identifier external_identifier VARCHAR(64)
+    //");
+
+    // Create a contribution type to create contributions as when syncing with Xero
+    // TODO: may want to allow user to select or create their own contribution type
+    if (!$contribution_type_id = CRM_Core_DAO::singleValueQuery("SELECT id FROM civicrm_financial_type WHERE name = 'Xero Invoice'")) {
+        CRM_Core_DAO::executeQuery("
+            INSERT INTO civicrm_financial_type (id, name, description, is_deductible, is_reserved, is_active)
+            VALUES (NULL, 'Xero Invoice', 'Contribution type for invoices downloaded from Xero', 0, 1, 1)
+        ");
+        $contribution_type_id = CRM_Core_DAO::singleValueQuery('SELECT LAST_INSERT_ID()');
+    }
+    variable_set('civixero_contribution_type_id', $contribution_type_id);
+    drupal_install_schema('civixero');
+}
+
+/**
+ * Implementation of hook_uninstall
+ */
+function civixero_uninstall() {
+    civicrm_initialize(true);
+    CRM_Core_DAO::executeQuery("DELETE FROM civicrm_financial_type WHERE name = 'Xero Invoice'");
+    variable_del('civixero_contribution_type_id');
+    drupal_uninstall_schema('civixero');
+}
+
+/**
+ * Implementation of hook_schema()
+ */
+function civixero_schema() {
+  $schema['cas_payments'] = array(
+      'description' => t('Mapping of Payments from Accounts package to CiviCRm'),
+      'fields'      => array(
+          'cas_pid'     => array(
+              'description' => t('Primary Key'),
+              'type'        => 'serial',
+              'not null'    => true
+          ),
+          'civicrm_cid' => array(
+              'description' => t('CiviCRM contact id'),
+              'type'        => 'int'
+          ),
+          'x_btid' => array(
+              'description' => t('Xero Bank Transaction identifier'),
+              'type'        => 'text',
+              'not null'    => true,
+          ),
+          'civicrm_ccid' => array(
+            'description' => t('Accounts contact identifier'),
+            'type'        => 'text',
+           ),
+          'last_sync' => array(
+              'description' => t('Date of last sync'),
+              'type'        => 'int'
+          ),
+          'errors' => array(
+              'description' => t('Error messages'),
+              'type'        => 'text',
+          ),
+          't_type' => array(
+              'description' => t('Type of transaction'),
+              'type'        => 'text',
+          ),
+          'reconciled' => array(
+              'description' => t('is reconciled?'),
+              'type'        => 'text',
+          ),
+          'additional_data' => array(
+              'description' => t('Store arbitrary serialized data such as address and phone number'),
+              'type'        => 'text',
+          ),
+          'plugin' => array(
+              'description' => t('The plugin responsible for creating the record'),
+              'type'        => 'varchar',
+              'length'      => 32
+          )
+
+      ),
+
+      'primary key' => array(
+          'cas_pid'
+      )
+
+  );
+    $schema['civixero_tracking'] = array(
+        'description' => t('Tracking Categories'),
+        'fields' => array(
+            'cxtid' => array(
+                'description' => t('TODO: please describe this field!'),
+                'type'        => 'serial',
+                'not null'    => TRUE,
+            ),
+            'name' => array(
+                'description' => t('TODO: please describe this field!'),
+                'type'        => 'varchar',
+                'length'      => '32',
+                'not null'    => TRUE,
+            ),
+            'value' => array(
+                'description' => t('TODO: please describe this field!'),
+                'type'        => 'varchar',
+                'length'      => '32',
+                'not null'    => TRUE,
+            ),
+            'last_sync' => array(
+                'description' => t('TODO: please describe this field!'),
+                'type'        => 'int',
+                'not null'    => TRUE,
+            ),
+        ),
+        'primary key' => array('cxtid'),
+
+    );
+
+    return $schema;
+
+}

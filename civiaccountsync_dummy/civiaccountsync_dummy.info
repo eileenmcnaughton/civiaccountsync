@@ -1,0 +1,8 @@
+; $Id$
+name = Dummy CiviAccountSync Plugin
+description = This is a test plugin for CiviAccountSync
+package = CiviCRM
+core = 6.x
+version = 6.x-1.0
+dependencies[] = civicrm
+dependencies[] = civiaccountsync

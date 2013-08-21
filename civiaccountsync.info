@@ -1,0 +1,8 @@
+; $Id$
+name = CiviCRM Accounts Package Integration
+description = Integrates CiviCRM with Accounting Systems (Xero ATM)
+package = CiviCRM
+version = 6.x-1.1
+core = 6.x
+dependencies[] = date_api
+dependencies[] = civicrm

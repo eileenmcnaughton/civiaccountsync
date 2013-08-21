@@ -1,0 +1,326 @@
+<?php
+// $Id$
+
+/**
+ * Implementation of hook_install
+ */
+function civiaccountsync_install() {
+  drupal_install_schema('civiaccountsync');
+}
+
+/**
+ * Implementation of hook_uninstall
+ */
+function civiaccountsync_uninstall() {
+
+    variable_del('civiaccountsync_plugins');
+    variable_del('civiaccountsync_plugins_configure_paths');
+    variable_del('civiaccountsync_last_run_info');
+    variable_del('civiaccountsync_sync_job_config');
+    drupal_uninstall_schema('civiaccountsync');
+}
+
+/**
+ * Implementation of hook_schema()
+ */
+function civiaccountsync_schema() {
+
+    $schema['cas_contacts'] = array(
+        'description' => t('Mapping of Contacts in CiviCRM to Accounts package'),
+        'fields'      => array(
+            'cas_cid'     => array(
+                'description' => t('Primary Key'),
+                'type'        => 'serial',
+                'not null'    => true
+            ),
+            'civicrm_cid' => array(
+                'description' => t('CiviCRM contact id'),
+                'type'        => 'int'
+            ),
+            'acc_cid' => array(
+                'description' => t('Accounts contact identifier'),
+                'type'        => 'text',
+                'not null'    => true
+            ),
+            'last_sync' => array(
+                'description' => t('Date of last sync'),
+                'type'        => 'int'
+            ),
+            'last_cas_mod' => array(
+                'description' => t('Date of last sync'),
+                'type'        => 'int',
+                'not null'    => true
+            ),
+            'errors' => array(
+                'description' => t('Error messages'),
+                'type'        => 'text',
+            ),
+            'notes' => array(
+                'description' => t('Notes'),
+                'type'        => 'text',
+            ),
+            'acc_first_name' => array(
+                'description' => t('First Name in Accounts package'),
+                'type'        => 'varchar',
+                'length'      => 64
+            ),
+            'acc_full_name' => array(
+                'description' => t('Full Name in Accounts package'),
+                'type'        => 'varchar',
+                'length'      => 128
+            ),
+            'acc_is_creditor' => array(
+                'description' => t('Contact is a creditor / supplier in Accounts package'),
+                'type'        => 'int',
+                'size'        => 'tiny',
+            ),
+            'acc_is_customer' => array(
+                'description' => t('Marked as a Customer in Accounts package'),
+                'type'        => 'int',
+                'size'        => 'tiny'
+            ),
+            'acc_last_name' => array(
+                'description' => t('Last Name in Accounts package'),
+                'type'        => 'varchar',
+                'length'      => 64
+            ),
+            'acc_primary_email' => array(
+                'description' => t('Primary e-mail in Accounts package'),
+                'type'        => 'varchar',
+                'length'      => 64
+            ),
+            'civi_ignore' => array(
+                'description' => t('Do not add to CiviCRM'),
+                'type'        => 'int',
+                'size'        => 'tiny',
+                'not null'    => true,
+                'default'     => 0
+            ),
+            'civi_suggested_contact_id' => array(
+                'description' => t('Potential Match in CiviCRM'),
+                'type' => 'int'
+            ),
+            'additional_data' => array(
+                'description' => t('Store arbitrary serialized data such as address and phone number'),
+                'type'        => 'text',
+            ),
+            'plugin' => array(
+                'description' => t('The plugin responsible for creating the record'),
+                'type'        => 'varchar',
+                'length'      => 32
+            )
+
+        ),
+
+        'primary key' => array(
+            'cas_cid'
+        )
+
+  );
+
+  $schema['cas_invoices'] = array(
+    'description' => t('civiaccountsync Invoice Sync Map'),
+    'fields' => array(
+      'cas_iid' => array(
+        'description' => t('Primary Key'),
+        'type' => 'serial',
+        'not null' => TRUE
+      ),
+      'civicrm_iid' => array(
+        'description' => t('CiviCrm contribution ID'),
+        'type' => 'int'
+      ),
+      'acc_cid' => array(
+        'description' => t('Accounts contact indentifier'),
+        'type'        => 'varchar',
+        'length'      => 255,
+        'not null'    => true
+      ),
+      'acc_iid' => array(
+        'description' => t('Accounts Invoice identifier'),
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+
+      'civicrm_status' => array(
+        'description' => t('status in CiviCRM'),
+        'type'        => 'int'
+      ),
+      'acc_last_mod' => array(
+        'description' => t('accounts_ Last Modified'),
+        'type' => 'int',
+      ),
+      'acc_status' => array(
+        'description' => t('accounts Status'),
+        'type' => 'varchar',
+        'length' => '32',
+      ),
+      'civicrm_amount' => array(
+        'description' => t('Amount in CiviCRM'),
+        'type' => 'float',
+      ),
+      'acc_amount' => array(
+        'description' => t('Amount in accounts'),
+        'type' => 'float',
+      ),
+      'acc_last_receipt' => array(
+        'description' => t('Last Amount received in accounts package'),
+        'type' => 'int',
+      ),
+      'additional_data' => array(
+        'description' => t('Store any additional stuff we need to keep track of'),
+        'type'        => 'text'
+      ),
+    ),
+    'primary key' => array(
+      'cas_iid'
+    ),
+    'indexes' => array(
+      'cas_iid' => array(
+        'cas_iid'
+      ),
+      'civicrm_iid' => array(
+        'civicrm_iid'
+      )
+    )
+  );
+
+  $schema['cas_pending'] = array(
+
+      'description' => t('Marks various CiviCRM entities as needing to be updated in accounts package'),
+
+      'fields' => array(
+          'entity_type' => array(
+              'description' => t('CiviCRM entity type, eg: contribution'),
+              'type'        => 'varchar',
+              'length'      => 32,
+              'not null'    => true
+          ),
+          'entity_id' => array(
+              'description' => t('ID of the entity marked for update in accounts package, eg: contribution id'),
+              'type'        => 'int',
+              'unsigned'    => true,
+              'not null'    => true
+          ),
+          'action' => array(
+              'description' => t("Action to perform in accounts package - can be one of create, update, delete, cancel"),
+              'type'        => 'varchar',
+              'length'      => 16,
+              'not null'    => true
+          )
+      ),
+
+      'primary key' => array('entity_type', 'entity_id', 'action')
+
+  );
+
+  $schema['cas_errors'] = array(
+    'description' => t('Errors generated by CiviAccountSync operations'),
+    'fields' => array(
+      'cas_eid' => array(
+        'description' => t('Primary Key'),
+        'type' => 'serial',
+        'not null' => TRUE
+      ),
+      'operation' => array(
+        'description' => t('Operation that caused the error'),
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'civicrm_entity_id' => array(
+        'description' => t('CiviCrm entity ID'),
+        'type' => 'int',
+        'not null' => TRUE
+      ),
+
+      'error_message' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'error_description' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'error_datetime' => array(
+        'description' => t('timestamp when error recorded'),
+        'type' => 'int',
+        'length' => '11',
+        'not null' => TRUE
+      ),
+      'civicrm_amount' => array(
+        'description' => t('Amount in CiviCRM'),
+        'type' => 'float',
+        'not null' => TRUE
+      ),
+      'error_resolved' => array(
+        'description' => t('Error resolved'),
+        'type' => 'int',
+        'length' => 1,
+        'not null' => TRUE
+      )
+    )
+    ,
+    'primary key' => array('cas_eid'),
+    /* - TODO: this index seems to be causing some problems - come back to this(?)
+    'indexes' => array(
+      'cas_iid' => array(
+        'cas_iid' => array('cas iid')
+      )
+    )
+    */
+  )
+  ;
+
+  /* $schema['cas_custom'] = array(
+  'description' => t('Custom Sync Tracking Table'),
+  'fields' => array(
+    'cas_tid' => array(
+      'description' => t('Primary Key'),
+      'type' => 'serial',
+      'not null' => TRUE,
+  ),
+    'name' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'varchar',
+      'length' => '32',
+      'not null' => TRUE,
+  ),
+    'value' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'varchar',
+y
+      'length' => '32',
+      'not null' => TRUE,
+  ),
+    'last_sync' => array(
+      'description' => t('TODO: please describe this field!'),
+      'type' => 'int',
+      'not null' => TRUE,
+  ),
+  ),
+  'primary key' => array('cas_tid'),
+  );
+  */
+
+  return $schema;
+}
+
+/*
+function civiaccountsync_update_6001() {
+  $ret[] = update_sql("ALTER TABLE {cas_invoices} ADD INDEX `civicrm_iid` (`civicrm_iid`)");
+  return $ret;
+}
+function civiaccountsync_update_6002() {
+  $ret[] = update_sql("ALTER TABLE {cas_invoices} CHANGE `status` `civicrm_status` INT( 11 ) NOT NULL ");
+  $ret[] = update_sql("ALTER TABLE {cas_invoices} DROP `last_sync`");
+  return $ret;
+}
+function civiaccountsync_update_6003() {
+  $ret[] = update_sql("ALTER TABLE {cas_invoices} ADD `acc_last_receipt` INT( 11 ) NOT NULL COMMENT '''Last Amount received in accounts package'");
+  return $ret;
+}
+*/
