@@ -40,7 +40,6 @@ function civiaccountsync_schema() {
             'acc_cid' => array(
                 'description' => t('Accounts contact identifier'),
                 'type'        => 'text',
-                'not null'    => true
             ),
             'last_sync' => array(
                 'description' => t('Date of last sync'),
@@ -49,7 +48,6 @@ function civiaccountsync_schema() {
             'last_cas_mod' => array(
                 'description' => t('Date of last sync'),
                 'type'        => 'int',
-                'not null'    => true
             ),
             'errors' => array(
                 'description' => t('Error messages'),
