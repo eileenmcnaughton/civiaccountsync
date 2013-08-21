@@ -97,32 +97,30 @@ function civiaccountsync_getCiviCRMContactstoUpdate($last_updated) {
     ));
     return array();
 }
-// Maybe this should be called getCiviCRMContributionsToUpdate?
-function civiaccountsync_getCiviCRMRecurContactstoUpdate($last_updated) {
 
-  civicrm_initialize(true);
+/**
+ * So, lets add them to the cas_contacts & then retrieve any contacts that need updating in a separate
+ * fn. The second fn will want to retrieve the id which this doesn't care about
+ * @param integer (timestamp) $last_updated
+ * @return void|multitype:
+ */
+function civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_updated) {
 
-  //TODO - currently code assumes that 1000 contributions is enough to bring it up-to-date & set last sync to current date
-  $result = civicrm_api('ContributionRecur', 'Get', array(
-      'version'                => 3,
-      'modified_date_low'      => date("Y-m-d", $last_updated),
-      'rowCount'               => 1000,
-      //'sort'                 => 'civicrm_log.modified_date ASC'
-  ));
-  if (!$result['is_error']) {
-    if (isset($result['values']))
-      return $result['values'];
-    return array();
+  if(!civicrm_initialize(true)) {
+    return;
   }
+  $last_updated = date('Y-m-d h-i-s', $last_updated);
 
-  civiaccountsync_error(t(
-  'Unable to retrieve pending contributions via API because @excuse',
-  array(
-  '@excuse' => $result['error_message']
-  )
-
-  ));
-  return array();
+  //@todo- would be better to use a civi table here - then we can join without worrying about prefixes
+  // but lets just be slack for now. db_query is possibly more robust WRT prefixes
+  $sql =
+  " INSERT INTO cas_contacts (civicrm_cid)
+    SELECT DISTINCT contact_id FROM civicrm_contribution_recur cr
+    LEFT JOIN cas_contacts cas ON cas.civicrm_cid = cr.contact_id
+    WHERE cas.cas_cid IS NULL AND cr.create_date > '" . $last_updated . "'
+   ";
+  CRM_Core_DAO::executeQuery($sql);
+  return TRUE;
 }
 function civiaccountsync_get_contact_id_from_external_id($external_id) {
     if ($external_id)
@@ -328,4 +326,26 @@ function &drupal_static($name, $default_value = NULL, $reset = FALSE) {
   // As the function returns a reference, the return should always be a
   // variable.
   return $data;
+}
+
+function civiaccountsync_writepush_result($contact, $result) {
+  $record          = new stdClass();
+
+  $record->civicrm_cid = $contact['id'];
+  $record->acc_cid = $result['ContactID'];
+  $record->last_cas_mod = strtotime($result['UpdatedDateUTC']);
+  $record->last_sync = strtotime('now');
+  $record->plugin       = 'civixero';
+  $cas_cid = db_select('cas_contacts', 'c')
+  ->fields('c', array('cas_cid'))
+  ->condition('civicrm_cid', $contact['id'], '=')
+  ->execute()
+  ->fetchField();
+
+  if (!empty($cas_cid)) {
+    $update[] = 'cas_cid';
+    $record->cas_cid = $cas_cid;
+  }
+
+  drupal_write_record('cas_contacts', $record, $update);
 }

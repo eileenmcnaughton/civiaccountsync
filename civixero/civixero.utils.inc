@@ -11,7 +11,7 @@
  * @return $accountsContact Contact Object/ array as expected by accounts package
  */
 function civixero_contact_mapCiviCRMParamstoAccountsParams($contact, $accountsID) {
-  
+
   $new_contact = array(
     array(
       "Name" => $contact['display_name'],
@@ -41,7 +41,11 @@ function civixero_contact_mapCiviCRMParamstoAccountsParams($contact, $accountsID
   if (! empty($accountsID)) {
     $new_contact['contactID'] = $accountsID;
   }
-
+  //I thought I should be able to pass by reference but it won't accept it
+  $changedContact = module_invoke_all('civixero_contact_alter', $new_contact, $contact);
+  if(!empty($changedContact)) {
+    $new_contact = $changedContact;
+  }
   return $new_contact;
 
 }
@@ -66,7 +70,7 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
   if (isset($value['participant_id'])) {
 
       $new_invoice = array(
-        array(  
+        array(
           "Type" => "ACCREC",
           "Contact" => array(
             "ContactNumber"             => $value['contact_id'],
@@ -111,7 +115,7 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
       );
   } else {
        $new_invoice = array(
-        array(  
+        array(
           "Type" => "ACCREC",
           "Contact" => array(
             "ContactNumber"             => $value['contact_id'],
@@ -127,7 +131,7 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
           "Reference"       => $cc . $value['event_code'] . " " . $value['display_name'],
           "CurrencyCode"    => /*'NZD'*/ CRM_Core_Config::singleton()->defaultCurrency,
           "LineAmountTypes" => "Inclusive",
-          
+
           // "LineItems" => array(
           //   "LineItem" => array(
           //     array(
@@ -137,7 +141,7 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
           //       "AccountCode" => $accountType,
           //       "Tracking"    => array(
           //         "TrackingCategory" => array(
-                    
+
           //           array(
           //             'TaxType' => 'OUTPUT',
           //             'Name'    => 'Block / Project',
@@ -154,11 +158,11 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
           //   )
           // )
         )
-      );   
+      );
   }
   //print "line items = " . print_r($value['line_items'], true);
   if (is_array($value['line_items'])) {
-    
+
     // For event based contributions, use Eileen's original code
     if (isset($value['participant_id']) and !empty($value['participant_id'])) {
       foreach ($value['line_items'] as $lineitem) {
@@ -187,7 +191,7 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
         );
       }
     } else {
-       
+
        // For other contributions, do this instead
        foreach ($value['line_items'] as $lineitem) {
           $new_invoice[0]['LineItems']['LineItem'][] = array(
@@ -208,7 +212,7 @@ function civixero_invoice_create($value, $cc = null, $accountType = null) {
         "AccountCode" => $accountType
       );
     }
-    
+
     //print_r($new_invoice);
     //echo "\n\n\n";
     $invoice_result = @drupal_static('civixero')->Invoices($new_invoice);
@@ -257,7 +261,7 @@ function civixero_validate_response($responseArray) {
 
     $message = '';
     $errors  = array();
-    
+
     // comes back as a string for oauth errors
     if (is_string($responseArray)) {
         foreach (explode('&', $responseArray) as $response_item) {

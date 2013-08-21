@@ -78,33 +78,38 @@ function civixero_contact_push($last_run) {
 function civixero_contactrecur_push($last_run) {
 
   $xero    = &drupal_static('civixero');
-  $results = civiaccountsync_getCiviCRMRecurContactstoUpdate($last_run);
+  civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_run);
 
-  foreach ($results as $contribution) {
+  // I guess we should store civi change date & then compare it in this mix
+  // we have the last sync & we want things that have changed since.
+  // if it has synced since last run I guess we don't need to do it now
+  $query  = db_select('cas_contacts', 'c')
+    ->fields('c', array('acc_cid','civicrm_cid','last_sync',));
+  $or = db_or()->isNull('last_sync')->condition('last_sync', $last_run, '<');
 
-    $accountsContactID = db_select('cas_contacts', 'c')
-    ->fields('c', array('acc_cid'))
-    ->condition('civicrm_cid', $contribution['contact_id'], '=')
-    ->execute()
-    ->fetchField();
+  $query->condition($or);
+  $count = 0;
+  $args = $query->getArguments();
 
-    $civiCRMcontact  = civiaccountsync_getContactDetailsFromCivi($contribution['contact_id']);
-
+  while(($syncRecord = $query->execute()->fetchAssoc()) != FALSE) {
+    $accountsContactID = $syncRecord['acc_cid'];
+    $civiContactID = $syncRecord['civicrm_cid'];
+    $civiCRMcontact  = civiaccountsync_getContactDetailsFromCivi($civiContactID);
     $accountsContact = civixero_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
     $result = @$xero->Contacts($accountsContact);
-
     // Catch oauth errors
     if (is_string($result) and $errors = civixero_validate_response($result)) {
       civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
       return;
     }
 
+    civiaccountsync_writepush_result($civiCRMcontact, $result['Contacts']['Contact']);
+    $count ++;
   }
-
   civiaccountsync_message(t('There were @count contacts with pending updates @somehow sent to Xero',
   array(
-  '@count'   => count($results) ? count($results) : 'no',
-  '@somehow' => count($results) ? 'that were' : 'to be'
+  '@count'   => $count ? $count : 'no',
+  '@somehow' => $count ? 'that were' : 'to be'
       )
   ));
 
@@ -118,7 +123,7 @@ function civixero_contactrecur_push($last_run) {
  *
  */
 function civixero_contact_pull($last_run) {
-
+  $last_run = 0;
     // Xero class seems to be setting some incorrect curlopts and generating php warnings
     // as a result. Suppressing those below with @ operator
     $result = @drupal_static('civixero')->Contacts(false, date("Y-m-d H:m:s", $last_run));
@@ -128,8 +133,7 @@ function civixero_contact_pull($last_run) {
     }
 
     if (isset($result['Contacts'])) {
-
-        foreach ($result['Contacts']['Contact'] as $contact) {
+        foreach ($result['Contacts'][0]['Contact'] as $contact) {
 
             $record          = new stdClass();
             $update          = array();
@@ -199,7 +203,6 @@ function civixero_contact_pull($last_run) {
             //$record->last_sync    = time(); // should we set this here?
 
             drupal_write_record('cas_contacts', $record, $update);
-
         }
 
     }
