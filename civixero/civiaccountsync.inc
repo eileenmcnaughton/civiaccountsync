@@ -74,8 +74,12 @@ function civixero_contact_push($last_run) {
 /*
  * Get all contact details for 'active' (generally pending) invoices where the
 * contact has changed since last update. Push to Xero
+*
+* @param integer $last_run timestamp of last completed sync
+* @param integer $throttle limit to do @ once  - not actually passing this in from anywhere yet
 */
-function civixero_contactrecur_push($last_run) {
+function civixero_contactrecur_push($last_run, $throttle = 50) {
+
 
   $xero    = &drupal_static('civixero');
   civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_run);
@@ -91,12 +95,13 @@ function civixero_contactrecur_push($last_run) {
   $count = 0;
   $args = $query->getArguments();
 
-  while(($syncRecord = $query->execute()->fetchAssoc()) != FALSE) {
+  while(($syncRecord = $query->execute()->fetchAssoc()) != FALSE && $count < $throttle) {
     $accountsContactID = $syncRecord['acc_cid'];
     $civiContactID = $syncRecord['civicrm_cid'];
     $civiCRMcontact  = civiaccountsync_getContactDetailsFromCivi($civiContactID);
     $accountsContact = civixero_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
     $result = @$xero->Contacts($accountsContact);
+
     // Catch oauth errors
     if (is_string($result) and $errors = civixero_validate_response($result)) {
       civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
