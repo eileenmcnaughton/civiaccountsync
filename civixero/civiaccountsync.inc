@@ -89,19 +89,20 @@ function civixero_contactrecur_push($last_run, $throttle = 50) {
   // if it has synced since last run I guess we don't need to do it now
   $query  = db_select('cas_contacts', 'c')
     ->fields('c', array('acc_cid','civicrm_cid','last_sync',));
-  $or = db_or()->isNull('last_sync')->condition('last_sync', $last_run, '<');
 
+  $or = db_or()->isNull('last_sync')->condition('last_sync', $last_run, '<');
   $query->condition($or);
   $count = 0;
-  $args = $query->getArguments();
-
-  while(($syncRecord = $query->execute()->fetchAssoc()) != FALSE && $count < $throttle) {
-    $accountsContactID = $syncRecord['acc_cid'];
-    $civiContactID = $syncRecord['civicrm_cid'];
+  $records = $query->execute()->fetchAll();
+  foreach ($records as $record) {
+    if($count == $throttle) {
+      continue;
+    }
+    $accountsContactID = $record->acc_cid;
+    $civiContactID = $record->civicrm_cid;
     $civiCRMcontact  = civiaccountsync_getContactDetailsFromCivi($civiContactID);
     $accountsContact = civixero_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
     $result = @$xero->Contacts($accountsContact);
-
     // Catch oauth errors
     if (is_string($result) and $errors = civixero_validate_response($result)) {
       civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
