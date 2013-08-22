@@ -17,7 +17,7 @@ function civixero_contact_mapCiviCRMParamstoAccountsParams($contact, $accountsID
       "Name" => $contact['display_name'],
       "FirstName" => $contact['first_name'],
       "LastName" =>  $contact['last_name'],
-      "EmailAddress" => $contact['email'],
+      "EmailAddress" => CRM_Utils_Rule::email($contact['email']) ? $contact['email'] : '',
       "ContactNumber" => $contact['contact_id'],
       "Addresses" => array(
         "Address" => array(
