@@ -88,7 +88,8 @@ function civixero_contactrecur_push($last_run, $throttle = 50) {
   // we have the last sync & we want things that have changed since.
   // if it has synced since last run I guess we don't need to do it now
   $query  = db_select('cas_contacts', 'c')
-    ->fields('c', array('acc_cid','civicrm_cid','last_sync',));
+    ->fields('c', array('acc_cid','civicrm_cid','last_sync',))
+    ->orderBy("last_sync");
 
   $or = db_or()->isNull('last_sync')->condition('last_sync', $last_run, '<');
   $query->condition($or);
