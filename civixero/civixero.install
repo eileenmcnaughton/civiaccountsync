@@ -95,8 +95,16 @@ function civixero_schema() {
               'description' => t('Type of transaction'),
               'type'        => 'text',
           ),
-          'reconciled' => array(
-              'description' => t('is reconciled?'),
+          'amount' => array(
+              'description' => t('Total Amount'),
+              'type'        => 'float',
+          ),
+          'payment_date' => array(
+              'description' => t('Payment Date'),
+              'type'        => 'text',
+          ),
+          'acc_status' => array(
+              'description' => t('Status'),
               'type'        => 'text',
           ),
           'additional_data' => array(
