@@ -16,11 +16,12 @@ function civiaccountsync_civicrm_post($op, $objectName, $objectId, &$objectRef) 
             case 'create':
             case 'edit':
             case 'delete':
-                db_query('REPLACE INTO {cas_pending} (entity_type, entity_id, action) VALUES (:entity_type, :entity_id, :action)',
+                CRM_Core_DAO::executeQuery('REPLACE INTO cas_pending (entity_type, entity_id, action)
+                  VALUES (%1, %2, %3)',
                     array(
-                        ':entity_type' => $objectName,
-                        ':entity_id'   => $objectId,
-                        ':action'      => ($op == 'edit' ? 'update' : $op)
+                        array($objectName, 'String'),
+                        array($objectId, 'Integer'),
+                        array( $op == 'edit' ? 'update' : $op, 'String'),
                     )
                 );
                 break;
