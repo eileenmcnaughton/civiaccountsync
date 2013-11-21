@@ -45,7 +45,6 @@ function civixero_install() {
         $contribution_type_id = CRM_Core_DAO::singleValueQuery('SELECT LAST_INSERT_ID()');
     }
     variable_set('civixero_contribution_type_id', $contribution_type_id);
-    drupal_install_schema('civixero');
 }
 
 /**
@@ -53,9 +52,7 @@ function civixero_install() {
  */
 function civixero_uninstall() {
     civicrm_initialize(true);
-    CRM_Core_DAO::executeQuery("DELETE FROM civicrm_financial_type WHERE name = 'Xero Invoice'");
     variable_del('civixero_contribution_type_id');
-    drupal_uninstall_schema('civixero');
 }
 
 /**
