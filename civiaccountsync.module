@@ -8,8 +8,10 @@
 /**
  * Implementation of hook_civicrm_post()
  * Mark entities (currently just contributions) as needing to be created / updated / deleted in accounts package
+ * @todo this is now turned off - reconsider later
  */
 function civiaccountsync_civicrm_post($op, $objectName, $objectId, &$objectRef) {
+  return;
 
     if ($objectName == 'Contribution') {
         switch ($op) {

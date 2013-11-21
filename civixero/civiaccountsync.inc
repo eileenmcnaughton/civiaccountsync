@@ -78,29 +78,27 @@ function civixero_contact_push($last_run) {
 * @param integer $last_run timestamp of last completed sync
 * @param integer $throttle limit to do @ once  - not actually passing this in from anywhere yet
 */
-function civixero_contactrecur_push($last_run, $throttle = 50) {
+function civixero_contactrecur_push($last_run, $throttle = 800) {
 
 
-  $xero    = &drupal_static('civixero');
+  $xero  = &drupal_static('civixero');
   civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_run);
+  $sql = "
+    SELECT acc_cid, civicrm_cid, last_sync FROM cas_contacts c
+    WHERE (last_sync IS NULL OR last_sync < %1)
+    ORDER BY last_sync
+  ";
 
-  // I guess we should store civi change date & then compare it in this mix
-  // we have the last sync & we want things that have changed since.
-  // if it has synced since last run I guess we don't need to do it now
-  $query  = db_select('cas_contacts', 'c')
-    ->fields('c', array('acc_cid','civicrm_cid','last_sync',))
-    ->orderBy("last_sync");
+  $dao = CRM_Core_DAO::executeQuery($sql, array(1 => array($last_run, 'String')));
 
-  $or = db_or()->isNull('last_sync')->condition('last_sync', $last_run, '<');
-  $query->condition($or);
   $count = 0;
-  $records = $query->execute()->fetchAll();
-  foreach ($records as $record) {
+
+  while($dao->fetch()) {
     if($count == $throttle) {
       continue;
     }
-    $accountsContactID = $record->acc_cid;
-    $civiContactID = $record->civicrm_cid;
+    $accountsContactID = $dao->acc_cid;
+    $civiContactID = $dao->civicrm_cid;
     $civiCRMcontact  = civiaccountsync_getContactDetailsFromCivi($civiContactID);
     $accountsContact = civixero_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
     $result = @$xero->Contacts($accountsContact);
@@ -762,7 +760,7 @@ function civixero_payment_pull($last_run) {
     civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
     return;
   }
-dpm($result['BankTransactions']);
+
   if (isset($result['BankTransactions']['BankTransaction'])) {
     foreach ($result['BankTransactions']['BankTransaction'] as $transaction) {
       $record = new stdClass();
