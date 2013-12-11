@@ -103,6 +103,7 @@ function civixero_contactrecur_push($last_run, $throttle = 800) {
     $accountsContact = civixero_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
     $result = @$xero->Contacts($accountsContact);
     // Catch oauth errors
+
     if (is_string($result) and $errors = civixero_validate_response($result)) {
       civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
       return;
@@ -143,12 +144,10 @@ function civixero_contact_pull($last_run) {
             $record          = new stdClass();
             $update          = array();
             $additional_data = array();
-
-            $cas_cid = db_select('cas_contacts', 'c')
-                ->fields('c', array('cas_cid'))
-                ->condition('acc_cid', $contact['ContactID'], '=')
-                ->execute()
-                ->fetchField();
+            $cas_cid = CRM_Core_DAO::singleValueQuery("SELECT cas_cid FROM cas_contacts c WHERE
+              civicrm_cid = {$contact['ContactNumber']}
+              OR acc_cid = {$contact['ContactID']}
+            ");
 
             if (!empty($cas_cid)) {
                 $update[] = 'cas_cid';
