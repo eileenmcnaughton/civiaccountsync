@@ -191,10 +191,10 @@ class Xero {
 
     public function __call($name, $arguments) {
         $name = strtolower($name);
-        $valid_methods = array('accounts','contacts','creditnotes','currencies','invoices','organisation','payments','taxrates','trackingcategories', 'banktransactions');
+        $valid_methods = array('accounts','bankstatements', 'contacts','creditnotes','currencies','invoices','organisation','payments','taxrates','trackingcategories', 'banktransactions');
         $valid_post_methods = array('contacts','creditnotes','invoices','banktransactions');
         $valid_put_methods = array('payments');
-        $valid_get_methods = array('banktransactions', 'contacts','creditnotes','invoices','accounts','currencies','organisation','taxrates','trackingcategories');
+        $valid_get_methods = array('bankstatements', 'banktransactions', 'contacts','creditnotes','invoices','accounts','currencies','organisation','taxrates','trackingcategories');
         $methods_map = array(
             'accounts' => 'Accounts',
             'contacts' => 'Contacts',
@@ -206,7 +206,9 @@ class Xero {
             'taxrates' => 'TaxRates',
             'trackingcategories' => 'TrackingCategories',
             'banktransactions' => 'BankTransactions',
+            'bankstatements' => 'Reports/BankStatement',
         );
+
         if ( !in_array($name,$valid_methods) ) {
             return false;
         }
@@ -239,8 +241,10 @@ class Xero {
                 $where = strip_tags(strval($where));
             }
             $order = ( count($arguments) > 3 ) ? strip_tags(strval($arguments[3])) : false;
+            $directParams = ( count($arguments) > 4 ) ? strip_tags(strval($arguments[4])) : false;
             $method = $methods_map[$name];
             $xero_url = self::ENDPOINT . $method;
+
             if ( $filterid ) {
                 $xero_url .= "/$filterid";
             }
@@ -250,10 +254,14 @@ class Xero {
             if ( $order ) {
                 $xero_url .= "&order=$order";
             }
+            if ( $directParams ) {
+              $xero_url .= (stristr($xero_url, '?') ? '&' : '?') . $directParams;
+            }
             $req  = OAuthRequest::from_consumer_and_token( $this->consumer, $this->token, 'GET',$xero_url);
             $req->sign_request($this->signature_method , $this->consumer, $this->token);
             $ch = curl_init();
-            curl_setopt($ch,CURLOPT_SSL_VERIFYPEER, false);
+
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_URL, $req->to_url());
             if ( $modified_after ) {
                 curl_setopt($ch, CURLOPT_HTTPHEADER, array("If-Modified-Since: $modified_after"));
