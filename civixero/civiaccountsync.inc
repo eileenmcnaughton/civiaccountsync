@@ -363,7 +363,7 @@ function civixero_invoice_pull($last_run) {
                 'invoice_id'             => $invoice['InvoiceNumber'],
                 'source'                 => 'Xero',
                 'contribution_status_id' => $contribution_statuses[$status],
-                'contribution_type_id'   => variable_get('civixero_contribution_type_id', 1),
+                'financial_type_id'   => variable_get('civixero_financial_type_id', 1),
                 'total_amount'           => $invoice['Total']
             );
 
@@ -457,26 +457,26 @@ function civixero_invoice_push($last_run) {
     $sql = "
 
             SELECT contribution.id AS contribution_id, contribution.payment_instrument_id AS payment_instrument,
-                   contribution.contribution_status_id, contribution.contribution_type_id, contribution.invoice_id, contribution.is_pay_later,
+                   contribution.contribution_status_id, contribution.financial_type_id, contribution.invoice_id, contribution.is_pay_later,
                    contribution.receive_date, contribution.total_amount, contribution.trxn_id, cct.name AS contribution_type,
                    contact.id AS contact_id, contact.display_name, contact.first_name, contact.last_name, contact.external_identifier,
                    participant.id AS participant_id, participant.register_date, participant.registered_by_id, participant.fee_amount as participant_fee_amount,
                    ov.label AS block, pending.action AS sync_action
 
-              FROM {civicrm_contribution} contribution
+              FROM civicrm_contribution contribution
 
-        INNER JOIN {civicrm_contribution_type} cct ON cct.id = contribution.contribution_type_id
-        INNER JOIN {civicrm_contact} contact ON contact.id = contribution.contact_id
-        INNER JOIN {cas_pending} pending ON pending.entity_id = contribution.id
+        INNER JOIN civicrm_financial_type cct ON cct.id = contribution.financial_type_id
+        INNER JOIN civicrm_contact contact ON contact.id = contribution.contact_id
+        INNER JOIN cas_pending pending ON pending.entity_id = contribution.id
 
-         LEFT JOIN {civicrm_participant_payment} pp ON pp.contribution_id = contribution.id
-         LEFT JOIN {civicrm_participant} participant ON pp.participant_id = participant.id
-         LEFT JOIN {civicrm_event} event ON participant.event_id = event.id
-         LEFT JOIN {civicrm_option_value} ov ON ov.value = event.event_type_id
-         LEFT JOIN {civicrm_option_group} og ON ov.option_group_id = og.id
-         LEFT JOIN {civicrm_membership_payment} mp ON mp.contribution_id = contribution.id
-         LEFT JOIN {civicrm_membership} membership ON mp.membership_id = membership.id
-         LEFT JOIN {cas_invoices} invoices ON contribution.id = invoices.civicrm_iid
+         LEFT JOIN civicrm_participant_payment pp ON pp.contribution_id = contribution.id
+         LEFT JOIN civicrm_participant participant ON pp.participant_id = participant.id
+         LEFT JOIN civicrm_event ev ON participant.event_id = ev.id
+         LEFT JOIN civicrm_option_value ov ON ov.value = ev.event_type_id
+         LEFT JOIN civicrm_option_group og ON ov.option_group_id = og.id
+         LEFT JOIN civicrm_membership_payment mp ON mp.contribution_id = contribution.id
+         LEFT JOIN civicrm_membership membership ON mp.membership_id = membership.id
+         LEFT JOIN cas_invoices invoices ON contribution.id = invoices.civicrm_iid
 
              WHERE contribution.id IN ($contribution_ids)
                AND pending.entity_type = 'Contribution'
@@ -484,40 +484,6 @@ function civixero_invoice_push($last_run) {
           ORDER BY contribution.id
 
     ";
-
-    /*
-    $sql = "
-
-        SELECT civicrm_participant.id AS participant_id,
-        civicrm_option_value.label AS block,
-        civicrm_contact.id AS contact_id, civicrm_contribution.id AS contribution_id,
-        civicrm_contribution.payment_instrument_id AS payment_instrument, civicrm_contact.display_name AS display_name,
-        civicrm_contact.first_name ,civicrm_contact.last_name ,
-        civicrm_contribution.contribution_status_id , civicrm_contribution.contribution_type_id ,
-        civicrm_contribution.invoice_id , civicrm_contribution.is_pay_later ,
-        civicrm_contribution.receive_date , civicrm_contribution.total_amount ,
-        civicrm_contribution.trxn_id , civicrm_event.id , civicrm_event.event_type_id ,
-        civicrm_contact.external_identifier,  civicrm_participant.register_date AS register_date,
-        civicrm_participant.registered_by_id ,civicrm_participant.fee_amount as participant_fee_amount
-
-        FROM {civicrm_participant} civicrm_participant
-        LEFT JOIN {civicrm_contact} civicrm_contact ON civicrm_participant.contact_id = civicrm_contact.id
-        LEFT JOIN {civicrm_participant_payment} civicrm_participant_payment ON civicrm_participant.id = civicrm_participant_payment.participant_id
-        LEFT JOIN {civicrm_contribution} civicrm_contribution ON civicrm_participant_payment.contribution_id = civicrm_contribution.id
-        LEFT JOIN {civicrm_event} civicrm_event ON civicrm_participant.event_id = civicrm_event.id
-        LEFT JOIN {civicrm_option_value} ON civicrm_option_value.value = civicrm_event.event_type_id
-        LEFT JOIN {civicrm_option_group} ON civicrm_option_value.option_group_id = civicrm_option_group.id
-        LEFT JOIN {cas_invoices} ci ON civicrm_contribution.id = ci.civicrm_iid
-
-        WHERE civicrm_participant.register_date >= '2010-07-21 19:38:08'
-        AND civicrm_option_group.name = 'event_type'
-        AND civicrm_contribution.id is not null
-        AND civicrm_contribution.contribution_status_id <> 3
-        AND ci.civicrm_iid IS NULL
-        ORDER BY civicrm_contribution.id
-  ";
-
-  */
 
     $count    = 0;
     $failures = 0;
