@@ -1,0 +1,38 @@
+<?php
+// $Id$
+function civiaccountsync_menu() {
+
+  $items['admin/settings/civiaccountsync'] = array(
+    'title' => 'civiaccountsync Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('civiaccountsync_settings_form'),
+    'access arguments' => array('administer civiaccountsync'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'civiaccountsync.admin.inc',
+  );
+
+  $items['cas/contact'] = array(
+    'title' => 'Sync Contacts With Accounts Package',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('civiaccountsync_form_contact'),
+    'access arguments' => array('administer civiaccountsync'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'civiaccountsync.forms.inc',
+  );
+    
+   $items['cas'] = array(
+    'title' => 'CiviAccountSync Dashboard',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('civiaccountsync_form_dashboard'),
+    'access arguments' => array('administer civiaccountsync'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'civiaccountsync.forms.inc',
+  );
+    return $items;
+    
+      
+}
+
+function civiaccountsync_perm() {
+  return array('civiaccountsync_action', 'administer civiaccountsync');
+}
