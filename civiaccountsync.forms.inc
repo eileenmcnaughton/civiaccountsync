@@ -139,15 +139,6 @@ function civiaccountsync_form_dashboard(){
     '#title' => t('Pull Contacts from Accounts Package. Last done on ' . date("Y-m-d H:m:s",variable_get('civixero_lastxerocontactget',0))),
     '#default_value' => 1,
   );
-
-  if(($contactsGenerateCount = civicaccountsync_getUnmatchedContactCount())>0){
-    $generateContactsSuggestionsMsg = 'Required for ' . $contactsGenerateCount ." contacts";
-  }
-  $form['civiaccountsync_generate_contactCivicrmSuggestions']= array(
-    '#type' => 'checkbox',
-    '#title' => t('Generate possible CiviCRM matches for unmatched Accounts Contacts.' .  $generateContactsSuggestionsMsg ),
-    '#default_value' => 1,
-  );
   if(($contactsUpdateCount = _getCiviCRMContactstoUpdate(1))>0){
     $generateContactstoUpdate = ' Required for ' . $contactsUpdateCount ." contacts" . $generateContactstoUpdate;
   }
@@ -210,11 +201,6 @@ function civiaccountsync_form_dashboard_submit($form,&$form_state){
      $value($accountsObj);
    }
   }
-  $contactsToSync = civiaccountsync_get_nextUnmatchedContact();
-  if(!empty($contactsToSync)){
-    drupal_goto('cas/contact/'.$contactsToSync);
-  }
-
 }
 /*
  * Get next accounts contact not matched to a CiviCRM record

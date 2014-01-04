@@ -10,54 +10,41 @@
  */
 
 function civiaccountsync_contact_pull($xero){
-
-  $table = 'cas_contacts';
-  $result = $xero->Contacts(false,date("Y-m-d H:m:s",variable_get('civixero_lastxerocontactget',0)));
-
+  $plugin = 'xero';
+  $result = $xero->Contacts(false, date("Y-m-d H:m:s", variable_get('civixero_lastxerocontactget',0)));
   if(!is_array($result)){
     echo $result;
     die;
   }
   if ($result['Contacts']){
-  drupal_set_message(t(count($result['Contacts'] . "retrieved")));
+    CRM_Core_Session::setStatus(count($result['Contacts'] . ts(' retrieved')), ts('Contact Pull'));
     foreach($result['Contacts']['Contact'] as $contact){
-    $record = new stdClass();
-
-    $cas_cid  = db_result(db_query("SELECT cas_cid FROM {cas_contacts} WHERE acc_cid = '%s'", $contact['ContactID']));
-    if (!empty($cas_cid) ){
-      $update = 'cas_cid';
-      $record->cas_cid = $cas_cid;
+      $params = array();
+      try {
+        $params['id'] = civicrm_api3('account_contact', 'getvalue', array(
+          'return' => 'id',
+          'accounts_contact_id' => $contact['ContactID'],
+          'plugin' => $plugin,
+        ));
+      }
+      catch (CiviCRM_API3_Exception $e) {
+        // this is an update
+      }
+      $params['accounts_display_name'] = $contact['Name'];
+      $params['contact_id'] = $contact['ContactNumber'];
+      $params['accounts_modified_date'] = $contact['UpdatedDateUTC'];
+      $params['plugin'] = 'xero';
+      $params['accounts_contact_id'] = $contact['ContactID'];
+      $params['accounts_data'] = json_encode($contact);
+      try {
+        $result = civicrm_api3('account_contact', 'create', $params);
+      }
+      catch (CiviCRM_API3_Exception $e) {
+        CRM_Core_Session::setStatus(ts('Failed to store ') . $params['accounts_display_name']
+        . ts(' with error ') . $e->getMessage()
+        , ts('Contact Pull failed'));
+      }
     }
-
-      if($contact['IsSupplier'] =='true'){
-       $record->acc_is_supplier  = 1;
-      }
-      if($contact['IsCustomer'] =='true'){
-       $record->acc_is_customer  = 1;
-      }
-     $record->acc_primary_email  = $contact['EmailAddress'];
-     $record->acc_full_name =$contact['Name'];
-      if ($contact['FirstName'] && $contact['LastName']){
-        //we have name break down so use it
-       $record->acc_first_name = $contact['FirstName'];
-       $record->acc_last_name = $contact['LastName'];
-
-      }else{
-         $name = explode(" ",$contact['Name']);
-         $record->acc_first_name = $name[0];
-         $record->acc_last_name = $name[1];
-         if ($name[2]){
-           $record->acc_last_name = $name[2];
-         }
-
-      }
-
-       $record->civicrm_cid = $contact['ContactNumber'];
-       $record->acc_cid = $contact['ContactID'];
-       $record->last_cas_mod = strtotime($contact['UpdatedDateUTC']);
-       drupal_write_record($table,$record,$update);
-       unset($update);
-  }
   }
   //set now as last synced time
   variable_set('civixero_lastxerocontactget',strtotime('now'));
@@ -68,10 +55,20 @@ function civiaccountsync_contact_pull($xero){
  * contact has changed since last update. Push to Xero
  */
 function civiaccountsync_contact_push($accountsObject){
-
+  $plugin = 'xero';
   $result = _getCiviCRMContactstoUpdate();
+
   foreach($result['values'] as $contribution){
-    $accountsContactID = db_result(db_query("SELECT  acc_cid FROM {cas_contacts} WHERE civicrm_cid = '%d'",$contribution['contact_id']));
+    try {
+    $accountsContactID = civicrm_api3('account_contact', 'getvalue', array(
+      'return' => 'accounts_contact_id',
+      'contact_id' => $contribution['contact_id'],
+      'plugin' => $plugin,
+    ));
+    }
+    catch (CiviCRM_API3_Exception $e) {
+      //we are creating a new contact - but we should add an option to update only or so review new contacts
+    }
     $civiCRMcontact  = _getContactDetailsFromCivi($contribution['contact_id']);
     $accountsContact = _civiaccountsync_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
 
@@ -80,33 +77,6 @@ function civiaccountsync_contact_push($accountsObject){
   variable_set('civixero_lastcivicontactput',strtotime('now'));
 }
 
-/*
- * Function looks at all contacts with a Xero ID & no CiviCRM ID &
- * populates table with possible CiviCRM contact IDs  For approval
- */
-function civiaccountsync_generate_contactCivicrmSuggestions(){
-
-  $sql = "SELECT cas_cid,  acc_first_name as first_name, acc_last_name as last_name FROM {cas_contacts} WHERE civicrm_cid =0  AND (civi_suggested_contact_id IS NULL OR civi_suggested_contact_id =0 )AND civi_ignore = 0";
-  $contacts = db_query($sql);
-  $table = 'cas_contacts';
-    while ($params = db_fetch_array($contacts)) { // this returns the row as an array, use db_fetch_object to get an object
-    try{
-      $result = civicrm_api3('contact', 'get', $params);
-       list( $params['civi_suggested_contact_id']) = array_keys($result['values']);
-       if (variable_get('civixero_automaticallymatchcontact',0) ==1 ){
-         $params['civicrm_cid'] = $params['civi_suggested_contact_id'];
-       }
-        $record = (object)$params;
-        $update = 'cas_cid';
-        drupal_write_record($table,$record,$update);
-        drupal_set_message(t("generated suggestion for " ) . $params['acc_first_name']);
-    }
-    catch(Exception $e) {
-    }
-
-  }
-
-}
 /*
  * Get contact details for any contacts with 'current' (pending) contributions that have
  * changed since the last update
@@ -125,9 +95,6 @@ function _getCiviCRMContactstoUpdate($count = 0){
  //   $params['sort'] = 'civicrm_log.modified_date ASC';
     //TODO - currently code assumes that 1000 contributions is enough to bring it up-do-date & set last sync to current date
     $params['rowCount'] = 50;
-    if (!empty($count)){
-      return $result['count'];
-    }
     $params['version'] =3;
     $result = civicrm_api('Contribution','Get',$params);
     return $result;
@@ -149,7 +116,7 @@ function _getContactDetailsFromCivi($contactID){
 /*
  * Map civicrm Array to Accounts package field names
  * @param array $contact Contact Array as returned from API
- * @param string	accountsID ID from Accounting system
+ * @param string  accountsID ID from Accounting system
  * @return $accountsContact Contact Object/ array as expected by accounts package
  */
 function _civiaccountsync_contact_mapCiviCRMParamstoAccountsParams($contact, $accountsID){
@@ -172,7 +139,7 @@ function _civiaccountsync_contact_mapCiviCRMParamstoAccountsParams($contact, $ac
             )
         ),
         "Phones"  => array(
-        			"Phone" => array("PhoneType" => 'DEFAULT',
+              "Phone" => array("PhoneType" => 'DEFAULT',
                              "PhoneNumber" => $contact['phone'],
                             ),
         )
@@ -183,15 +150,4 @@ function _civiaccountsync_contact_mapCiviCRMParamstoAccountsParams($contact, $ac
   }
 
 return $new_contact ;
-}
-
-
-/*
- * Calculate how many contacts are waiting for suggestions to be generated
- */
-
-function civicaccountsync_getUnmatchedContactCount(){
-
-    $sql = "SELECT count(cas_cid) FROM {cas_contacts} WHERE civicrm_cid =0  AND (civi_suggested_contact_id IS NULL OR civi_suggested_contact_id =0 )AND civi_ignore = 0";
-
 }
