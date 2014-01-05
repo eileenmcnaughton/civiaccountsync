@@ -137,14 +137,10 @@ function civiaccountsync_get_contact_id_from_external_id($external_id) {
  */
 function civiaccountsync_getContactDetailsFromCivi($contactID) {
 
-    $contact = civicrm_api('Contact', 'Get', array(
-        'id'      => $contactID,
-        'version' => 3
+    $contact = civicrm_api3('Contact', 'get', array(
+      'id'  => $contactID,
     ));
-    if (!$contact['is_error'])
-        return reset($contact['values']);
-    return array();
-
+    return reset($contact['values']);
 }
 
 /*
