@@ -11,43 +11,12 @@
 
 function civiaccountsync_contact_pull($xero){
   $plugin = 'xero';
-  $result = $xero->Contacts(false, date("Y-m-d H:m:s", variable_get('civixero_lastxerocontactget',0)));
-  if(!is_array($result)){
-    echo $result;
-    die;
-  }
-  if ($result['Contacts']){
-    CRM_Core_Session::setStatus(count($result['Contacts'] . ts(' retrieved')), ts('Contact Pull'));
-    foreach($result['Contacts']['Contact'] as $contact){
-      $params = array();
-      try {
-        $params['id'] = civicrm_api3('account_contact', 'getvalue', array(
-          'return' => 'id',
-          'accounts_contact_id' => $contact['ContactID'],
-          'plugin' => $plugin,
-        ));
-      }
-      catch (CiviCRM_API3_Exception $e) {
-        // this is an update
-      }
-      $params['accounts_display_name'] = $contact['Name'];
-      $params['contact_id'] = $contact['ContactNumber'];
-      $params['accounts_modified_date'] = $contact['UpdatedDateUTC'];
-      $params['plugin'] = 'xero';
-      $params['accounts_contact_id'] = $contact['ContactID'];
-      $params['accounts_data'] = json_encode($contact);
-      try {
-        $result = civicrm_api3('account_contact', 'create', $params);
-      }
-      catch (CiviCRM_API3_Exception $e) {
-        CRM_Core_Session::setStatus(ts('Failed to store ') . $params['accounts_display_name']
-        . ts(' with error ') . $e->getMessage()
-        , ts('Contact Pull failed'));
-      }
-    }
-  }
+  $params = array(
+    'start_date' => date("Y-m-d H:m:s", variable_get('civixero_lastxerocontactget', 0)),
+  );
+  $result = civicrm_api3('xerosync', 'contactpull', $params);
   //set now as last synced time
-  variable_set('civixero_lastxerocontactget',strtotime('now'));
+  variable_set('civixero_lastxerocontactget', strtotime('now'));
 }
 
 /*
