@@ -269,27 +269,12 @@ function civiaccountsync_form_contact(&$form_state) {
 }
 function civiaccountsync_form_contact_submit($form, &$form_state) {
   switch ($form_state['values']['sync_action']) {
-
-
     // 'Create contact in CiviCRM' was selected ..
-
-
     case 'create':
-
-
       if (! module_exists('civicrm')) {
-
-
         return;
       }
-
-
       civicrm_initialize(true);
-
-
-      require_once "api/api.php";
-
-
       $params = array(
 
 

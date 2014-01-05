@@ -17,6 +17,7 @@ function civixero_capabilities() {
 
 function civixero_init() {
   $xero = &drupal_static('civixero');
+  civicrm_initialize();
   $xeroSync = new CRM_Xerosync_Base();
   $xero = $xeroSync->getSingleton();
   return $xero;
@@ -70,48 +71,14 @@ function civixero_contact_push($last_run) {
 * @param integer $throttle limit to do @ once  - not actually passing this in from anywhere yet
 */
 function civixero_contactrecur_push($last_run, $throttle = 800) {
-
-
-  $xero  = &drupal_static('civixero');
-  civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_run);
-  $sql = "
-    SELECT acc_cid, civicrm_cid, last_sync FROM cas_contacts c
-    WHERE (last_sync IS NULL OR last_sync < %1)
-    ORDER BY last_sync
-  ";
-
-  $dao = CRM_Core_DAO::executeQuery($sql, array(1 => array($last_run, 'String')));
-
-  $count = 0;
-
-  while($dao->fetch()) {
-    if($count == $throttle) {
-      continue;
-    }
-    $accountsContactID = $dao->acc_cid;
-    $civiContactID = $dao->civicrm_cid;
-    $civiCRMcontact  = civiaccountsync_getContactDetailsFromCivi($civiContactID);
-    $accountsContact = civixero_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
-    $result = @$xero->Contacts($accountsContact);
-    // Catch oauth errors
-
-    if (is_string($result) and $errors = civixero_validate_response($result)) {
-      civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
-      return;
-    }
-
-    civiaccountsync_writepush_result($civiCRMcontact, $result['Contacts']['Contact']);
-    $count ++;
+  try {
+    $result = civicrm_api3('xerosync', 'contactpush', array());
   }
-  civiaccountsync_message(t('There were @count contacts with pending updates @somehow sent to Xero',
-  array(
-  '@count'   => $count ? $count : 'no',
-  '@somehow' => $count ? 'that were' : 'to be'
-      )
-  ));
-
-  return true;
-
+  catch (Exception $e) {
+    dpm($e->getMessage());
+  }
+  civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_run);
+  return;
 }
 /*
  *   get contacts from Xero & store / update them in civixero_contacts
@@ -120,6 +87,10 @@ function civixero_contactrecur_push($last_run, $throttle = 800) {
  *
  */
 function civixero_contact_pull($last_run) {
+  if ($last_run > strtotime('2 days ago')) {
+    //we will get a min of 2 days to be sure ...
+    $last_run = strtotime('2 days ago');
+  }
   $params = array(
     'start_date' => date("Y-m-d H:m:s", $last_run),
   );

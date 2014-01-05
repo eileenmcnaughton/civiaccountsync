@@ -115,10 +115,10 @@ function civiaccountsync_stashCiviCRMRecurContactstoUpdate($last_updated) {
   //@todo- would be better to use a civi table here - then we can join without worrying about prefixes
   // but lets just be slack for now. db_query is possibly more robust WRT prefixes
   $sql =
-  " INSERT INTO cas_contacts (civicrm_cid)
-    SELECT DISTINCT contact_id FROM civicrm_contribution_recur cr
-    LEFT JOIN cas_contacts cas ON cas.civicrm_cid = cr.contact_id
-    WHERE cas.cas_cid IS NULL AND cr.create_date > '" . $last_updated . "'
+  " INSERT INTO civicrm_account_contact (contact_id)
+    SELECT DISTINCT cr.contact_id FROM civicrm_contribution_recur cr
+    LEFT JOIN civicrm_account_contact cas ON cas.contact_id = cr.contact_id
+    WHERE cas.contact_id IS NULL AND cr.create_date > '" . $last_updated . "'
    ";
   CRM_Core_DAO::executeQuery($sql);
   return TRUE;
@@ -292,24 +292,3 @@ function civiaccountsync_updateParticipantFeeAmount($participantID, $amount) {
 
 }
 
-function civiaccountsync_writepush_result($contact, $result) {
-  $record          = new stdClass();
-
-  $record->civicrm_cid = $contact['id'];
-  $record->acc_cid = $result['ContactID'];
-  $record->last_cas_mod = strtotime($result['UpdatedDateUTC']);
-  $record->last_sync = strtotime('now');
-  $record->plugin       = 'civixero';
-  $cas_cid = db_select('cas_contacts', 'c')
-  ->fields('c', array('cas_cid'))
-  ->condition('civicrm_cid', $contact['id'], '=')
-  ->execute()
-  ->fetchField();
-
-  if (!empty($cas_cid)) {
-    $update[] = 'cas_cid';
-    $record->cas_cid = $cas_cid;
-  }
-
-  drupal_write_record('cas_contacts', $record, $update);
-}
