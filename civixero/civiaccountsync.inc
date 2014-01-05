@@ -16,19 +16,10 @@ function civixero_capabilities() {
 }
 
 function civixero_init() {
-
-    // Initialize object for interacting with the Xero private application API + load in util functions
-    module_load_include('php', 'civixero', 'Xero');
-    module_load_include('inc', 'civixero', 'civixero.utils');
-
-    $civixero_key      = variable_get('civixero_key',"");
-    $civixero_secret   = variable_get('civixero_secret',"");
-    $publicCertificate = variable_get('civixero_publiccert',"");
-    $privateKey        = variable_get('civixero_privatekey',"");
-
-    $xero = &drupal_static('civixero');
-    $xero = new Xero($civixero_key, $civixero_secret, $publicCertificate, $privateKey);
-    return $xero;
+  $xero = &drupal_static('civixero');
+  $xeroSync = new CRM_Xerosync_Base();
+  $xero = $xeroSync->getSingleton();
+  return $xero;
 }
 
 /*
@@ -129,94 +120,11 @@ function civixero_contactrecur_push($last_run, $throttle = 800) {
  *
  */
 function civixero_contact_pull($last_run) {
-  $last_run = 0;
-    // Xero class seems to be setting some incorrect curlopts and generating php warnings
-    // as a result. Suppressing those below with @ operator
-    $result = @drupal_static('civixero')->Contacts(false, date("Y-m-d H:m:s", $last_run));
-    if (is_string($result) and $errors = civixero_validate_response($result)) {
-        civiaccountsync_error('Xero Error: <pre>' . print_r($errors, true) . '</pre>');
-        return;
-    }
-
-    if (isset($result['Contacts'])) {
-        foreach ($result['Contacts'][0]['Contact'] as $contact) {
-
-            $record          = new stdClass();
-            $update          = array();
-            $additional_data = array();
-            $cas_cid = CRM_Core_DAO::singleValueQuery("SELECT cas_cid FROM cas_contacts c WHERE
-              civicrm_cid = {$contact['ContactNumber']}
-              OR acc_cid = {$contact['ContactID']}
-            ");
-
-            if (!empty($cas_cid)) {
-                $update[] = 'cas_cid';
-                $record->cas_cid = $cas_cid;
-            }
-
-            if (isset($contact['IsSupplier'])) {
-                $record->acc_is_supplier = $contact['IsSupplier'] == 'true' ? 1 : 0;
-            }
-
-            if (isset($contact['IsCustomer'])) {
-                $record->acc_is_customer = $contact['IsCustomer'] == 'true' ? 1 : 0;
-            }
-
-            if (isset($contact['EmailAddress'])) {
-                $record->acc_primary_email = $contact['EmailAddress'];
-            }
-
-            if (isset($contact['Name'])) {
-                $record->acc_full_name = $contact['Name'];
-            }
-
-            if (isset($contact['FirstName']) && isset($contact['LastName'])) {
-
-                //we have name break down so use it
-                $record->acc_first_name = $contact['FirstName'];
-                $record->acc_last_name  = $contact['LastName'];
-
-                if (!isset($record->acc_full_name)) {
-                    $record->acc_full_name = $contact['FirstName'] . ' ' . $contact['LastName'];
-                }
-
-            }
-
-            if (isset($contact['ContactNumber'])) {
-                $record->civicrm_cid = $contact['ContactNumber'];
-            } else {
-                $record->civicrm_cid = 0;
-            }
-
-            if (isset($contact['Addresses']['Address'])) {
-                $additional_data['Address'] = $contact['Addresses']['Address'];
-            }
-
-            if (isset($contact['Phones']['Phone'])) {
-                $additional_data['Phone'] = $contact['Phones']['Phone'];
-            }
-
-            if ($additional_data) {
-                $record->additional_data = serialize($additional_data);
-            }
-
-            $record->acc_cid      = $contact['ContactID'];
-            $record->last_cas_mod = strtotime($contact['UpdatedDateUTC']);
-            $record->plugin       = 'civixero';
-
-            //$record->last_sync    = time(); // should we set this here?
-
-            drupal_write_record('cas_contacts', $record, $update);
-        }
-
-    }
-
-    // civiaccountsync now manages updating the last run time - return boolean to indicate success or failure
-    //variable_set('civixero_lastxerocontactget', strtotime('now'));
-
-    // optimistically assume that went ok for now
-    return true;
-
+  $params = array(
+    'start_date' => date("Y-m-d H:m:s", $last_run),
+  );
+  $result = civicrm_api3('xerosync', 'contactpull', $params);
+  return true;
 }
 
 function civixero_invoice_pull($last_run) {
