@@ -16,7 +16,7 @@ function civiaccountsync_form_dashboard(){
   );
   $form['civiaccountsync_invoice_pull']= array(
     '#type' => 'checkbox',
-    '#title' => t('Pull invoice Updates From Accounts Package since ' .  date('Y-m-d h-i-s', variable_get ( 'civixero_lastxeroinvoiceget',0))),
+    '#title' => t('Pull invoice Updates From Accounts Package since ' .  date('Y-m-d h-i-s', variable_get ('civixero_lastxeroinvoiceget',0))),
     '#default_value' => 1,
   );
 

@@ -18,7 +18,7 @@ function civiaccountsync_invoice_pull($accountsObject) {
   );
   $result = civicrm_api3('xerosync', 'invoicepull', $params);
   //set now as last synced time
-  variable_set ( 'civixero_lastxeroinvoiceget', 'now');
+  variable_set ( 'civixero_lastxeroinvoiceget', strtotime('now'));
 }
 
 /*
@@ -31,20 +31,7 @@ function civiaccountsync_invoice_push($accObject) {
   //todo  - how best to restructure this? I need an sql contribution vs civicrm_accountinvoice but
   //what other info do I get in the same sql & what do I get using API?
   $sql = "
-SELECT civicrm_participant.id AS participant_id,
-civicrm_option_value.label AS block,
-civicrm_contact.id AS contact_id, civicrm_contribution.id AS contribution_id,
-civicrm_contribution.payment_instrument_id AS payment_instrument, civicrm_contact.display_name AS display_name,
-civicrm_contact.first_name ,civicrm_contact.last_name ,
-civicrm_contribution.contribution_status_id , civicrm_contribution.financial_type_id ,
-civicrm_contribution.invoice_id , civicrm_contribution.is_pay_later ,
-civicrm_contribution.receive_date , civicrm_contribution.total_amount ,
-civicrm_contribution.trxn_id , civicrm_event.id , civicrm_event.event_type_id ,
-civicrm_value_event_details_17.event_code_75 AS event_code,
-civicrm_value_event_details_17.programme_81 AS programme,
-civicrm_contact.external_identifier,  civicrm_participant.register_date AS register_date,
-civicrm_participant.registered_by_id ,civicrm_participant.fee_amount as participant_fee_amount
-
+SELECT civicrm_contribution.id AS id
 FROM civicrm_participant civicrm_participant
 LEFT JOIN civicrm_contact civicrm_contact ON civicrm_participant.contact_id = civicrm_contact.id
 LEFT JOIN civicrm_participant_payment civicrm_participant_payment ON civicrm_participant.id = civicrm_participant_payment.participant_id
@@ -66,33 +53,11 @@ ORDER BY civicrm_contribution.id
    // module_invoke_all('invoice_prerequisites',$invoice,$accObject);
   $count = 0;
   $dao = CRM_Core_DAO::executeQuery($sql);
+
   while ($dao->fetch()) {
-   $errors = array();
    $invoice = (array) $dao;
-   $errors =  module_invoke_all('invoice_prerequisites',$invoice, $accObject);
-   if(!empty($errors)){
-     drupal_set_message("<pre>". print_r($errors,true). "</pre>");
-     return;
-   }
-    //if muliple participants one line item each
-    $invoice ['line_items'] = _getLineItems( $invoice );
-
-    //cc denotes 'is credit card' & is pre-pended to cretid card description in Xero
-    $cc = "";
-    if ($invoice ['payment_instrument'] == 1 && $invoice ['contribution_status_id'] == 1) {
-      $cc = "cc";
-    }
-    $xeroID = "";
-    if ($invoice ['external_identifier']) {
-      $xeroIDValue = substr ( $invoice ['external_identifier'], 0, 8 ) . "-" . substr ( $invoice ['external_identifier'], 8, 4 ) . "-" . substr ( $invoice ['external_identifier'], 12, 4 ) . "-" . substr ( $invoice ['external_identifier'], 16, 4 ) . "-" . substr ( $invoice ['external_identifier'], 20 );
-      $xeroID = "<ContactID>" . $xeroIDValue . "</ContactID>";
-    }
-
-    $accountType = _getAccountType ( $invoice ['block'] );
-    if($invoice['programme'] =='Circus Fit'){
-      $accountType = 3546;
-    }
-    _civiaccountsync_invoice_create ( $accObject, $invoice, $cc, $accountType );
+    _civiaccountsync_invoice_create($accObject, $invoice);
+    return;
     $count++;
   }
     if(!empty($count)){
@@ -101,58 +66,63 @@ ORDER BY civicrm_contribution.id
     variable_set ( 'civixero_lastxeroinvoiceput', strtotime('now'));
 }
 
-function _civiaccountsync_invoice_create($accountsObject, $value, $cc = null, $accountType = null) {
+function _civiaccountsync_invoice_create($accountsObject, $value) {
 
-  $new_invoice = array (
-    array ("Type" => "ACCREC",
-           "Contact" => array (
-             "ContactNumber" => $value [contact_id],
-             'Name' => $value [display_name],
-             'AccountsRecievableTaxType' => 'OUTPUT',
-             'FirstName' => $value ['first_name'],
-             'LastName' => $value ['last_name'] ),
-           "Date" => substr ( $value ['register_date'], 0, 10 ),
-           "DueDate" => substr ( $value ['register_date'], 0, 10 ),
-           "Status" => "SUBMITTED",
-           "InvoiceNumber" => $value ['contribution_id'],
-           "Reference" => $cc . $value ['event_code'] . " " . $value ['display_name'],
-           "CurrencyCode" => 'NZD',
-           "LineAmountTypes" => "Inclusive",
-           "LineItems" => array (
-             "LineItem" => array (
-               array (
-                 "Description" => $value ['event_code'] . " " . $value ['display_name'],
-                 "Quantity" => "1",
-                 "UnitAmount" => $value ['participant_fee_amount'],
-                 "AccountCode" => $accountType,
-                 "Tracking" => array (
-                   "TrackingCategory" => array (
-                     array (
-                       'TaxType' => 'OUTPUT',
-                       'Name' => 'Block / Project',
-                       'Option' => $value [block] ),
-                     array (
-                       'TaxType' => 'OUTPUT',
-                       'Name' => 'Class',
-                       'Option' => $value ['event_code'] )
-                     )
-                 ) ) ) ) ) );
-  if (is_array ( $value ['line_items'] )) {
-    foreach ( $value ['line_items'] as $lineitem ) {
-
-      $new_invoice [0] ['LineItems'] ['LineItem'] [] = array ("Description" => $value ['event_code'] . " " . $lineitem ['display_name'], "Quantity" => "1", "UnitAmount" => $lineitem ['participant_fee_amount'], "AccountCode" => $accountType, "Tracking" => array ("TrackingCategory" => array (array ('TaxType' => 'OUTPUT', 'Name' => 'Block / Project', 'Option' => $value [block] ), array ('TaxType' => 'OUTPUT', 'Name' => 'Class', 'Option' => $value [event_code] ) )
-
-       ) );
+  $xero = new CRM_Xerosync_Invoice();
+  $contributionID = $value['id'];
+  try{
+  // ok this chaining is a bit heavy but it would be good to work towards API returning this more efficiently
+  // ie. not keen on the fact you can't easily get line items for contributions related to participants
+  // & TBH the communication with Xero takes 90% of the script time ...
+  // @todo - set return properties on contribution.get
+  $contribution = civicrm_api3('contribution', 'getsingle', array(
+    'api.line_item.get' => 1, 'id' => $contributionID,
+    'api.participant_payment.get' => array(
+      'return' => 'api.participant., participant_id',
+      'api.participant.get' => array(
+        'api.line_item.get' => 1,
+        'return' => 'participant_source, event_id, financial_type_id',
+      )
+    )
+  ));
+  if($contribution['api.line_item.get']['count']) {
+    $contribution['line_items'] = $contribution['api.line_item.get']['values'];
+  }
+  else {
+    //we'll keep the participant record for anyone trying to do hooks
+    $contribution['participant'] = $contribution['api.participant_payment.get']['values'][0]['api.participant.get']['values'][0];
+    $contribution['line_items'] = $contribution['participant']['api.line_item.get']['values'];
+    //if muliple participants one line item each
+    _getAdditionalParticipanLineItems($contribution);
+  }
+  foreach ($contribution['line_items'] as &$lineItem) {
+    $lineItem['accounting_code'] = CRM_Financial_BAO_FinancialAccount::getAccountingCode($lineItem['financial_type_id']);
+    if(!isset($lineItem['contact_id'])) {
+      //this would have been set for a secondary participant above so we are ensuring primary ones have it
+      // for conformity & ease downstream
+      $lineItem['contact_id'] = $contribution['contact_id'];
+    }
+    if(!isset($lineItem['display_name'])) {
+      //this would have been set for a secondary participant above so we are ensuring primary ones have it
+      // for conformity & ease downstream
+      $lineItem['display_name'] = $contribution['display_name'];
     }
   }
+  //@todo move the getAccountingCode to a fn that caches it
+  $contribution['accounting_code'] = CRM_Financial_BAO_FinancialAccount::getAccountingCode($contribution['financial_type_id']);
+  }
+  catch(Exception $e) {
+    dpm($e, $e->getMessage());
+  }
 
-  $invoice_result = $accountsObject->Invoices ( $new_invoice );
+  $new_invoice = $xero->mapToAccounts($contribution, NULL);
+
+  $invoice_result = $accountsObject->Invoices ($new_invoice);
   $errors = civicaccountsync_civixero_validate_response($invoice_result ) ;
   if (is_array($errors)){
     drupal_set_message("<pre>".print_r($errors,true)." for invoice $value[contribution_id] for contact $value[contact_id] : $value[display_name]</pre>");
     return $errors;
   }
-
 
     $record = new stdClass ();
     $record->acc_iid = $invoice_result ['Id'];
@@ -303,28 +273,25 @@ function civicaccountsync_invoice_cancel_inCivi($xero){
    * @param array $invoice Invoice array being prepared for Xero
    * @return array $lineitems if there are some else null
    */
-function _getLineItems(&$invoice) {
-  if ($invoice ['total_amount']-> $invoice ['participant_fee_amount']) {
-    require_once 'api/api.php';
+function _getAdditionalParticipanLineItems(&$invoice) {
+  $rowsTotal = 0;
+  foreach ($invoice['line_items'] as $line_item) {
+    $rowsTotal .= $line_item['line_total'];
+  }
+
+  if ($invoice['total_amount'] > $rowsTotal) {
     // api let us down use direct sql
-    // TODO get api to accept the below
+    // @TODO get api to accept the below
     //  $otherParticipants = civicrm_api('Participant','Get',array('version' =>3,'participant_registered_by_id' =>$invoice['participant_id']));
-
-
-    $sql = "SELECT * FROM {civicrm_participant} WHERE registered_by_id = %d ";
-    $result = db_query ( $sql, $invoice ['participant_id'] );
-    while ( $data = db_fetch_object ( $result ) ) {
-      $id = $data->id;
-      $apiResult = civicrm_api ( 'Participant', 'Get', array ('version' => 3, 'id' => $data->id, 'sequential' => 1 ) );
-      $line_items [] = $apiResult ['values'] [0];
+    $sql = "SELECT p.id, contact_id, display_name FROM civicrm_participant p
+      LEFT JOIN civicrm_contact c ON c.id = p.contact_id
+      WHERE registered_by_id = %1";
+    $dao = CRM_Core_DAO::executeQuery($sql, array(1 => array($invoice['participant']['id'], 'Integer')));
+    while ($dao->fetch()) {
+      $lineitems = civicrm_api3('line_item', 'get', array('sequential' => 1, 'entity_id' => $dao->id, 'entity_table' => 'civicrm_participant'));
+      $invoice['line_items'][] = array_merge($lineitems['values'][0], array('contact_id' => $dao->contact_id, 'display_name' => $dao->display_name));
     }
   }
-  if (is_array ( $line_items )) {
-    return $line_items;
-  } else {
-    return null;
-  }
-
 }
 
 /*
@@ -365,53 +332,3 @@ function _updateParticipantFeeAmount($participantID, $amount) {
 /*
  * Wellington Circus Trust function with a future elsewhere
  */
-function _getAccountType($block) {
-  //TODO $all_accounts = $xero->Accounts; will get all accounts - compare?
-  if(strpos($block,"I") == 3){
-      return 3545;
-  }
-
-  switch ($block) {
-    case "10-1" :
-    case "11-1" :
-    case "12-1" :
-    case "13-1" :
-    case "14-1" :
-      $accountType = 3541;
-      break;
-    case "12-2" :
-    case "11-2" :
-    case "10-2" :
-    case "13-2" :
-    case "14-2" :
-      $accountType = 3542;
-      break;
-    case "13-3":
-    case "14-3":
-    case "12-3" :
-    case "10-3":
-    case "11-3":
-      $accountType = 3543;
-      break;
-    case "12-4":
-    case "10-4":
-    case "11-4":
-    case "13-4":
-    case "14-4":
-      $accountType = 3544;
-      break;
-    case "Fundraising":
-      $accountType = 3610;
-      break;
-    case "Practice Club":
-      $accountType = 3590;
-      break;
-  }
-
-
-  if ($block == "One-off Special Classes") {
-    $accountType = 3540;
-  }
-
-  return $accountType;
-}
