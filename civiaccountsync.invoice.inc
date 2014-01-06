@@ -32,18 +32,10 @@ function civiaccountsync_invoice_push($accObject) {
   //what other info do I get in the same sql & what do I get using API?
   $sql = "
 SELECT civicrm_contribution.id AS id
-FROM civicrm_participant civicrm_participant
-LEFT JOIN civicrm_contact civicrm_contact ON civicrm_participant.contact_id = civicrm_contact.id
-LEFT JOIN civicrm_participant_payment civicrm_participant_payment ON civicrm_participant.id = civicrm_participant_payment.participant_id
-LEFT JOIN civicrm_contribution civicrm_contribution ON civicrm_participant_payment.contribution_id = civicrm_contribution.id
-LEFT JOIN civicrm_event civicrm_event ON civicrm_participant.event_id = civicrm_event.id
-LEFT JOIN civicrm_value_event_details_17 civicrm_value_event_details_17 ON civicrm_event.id = civicrm_value_event_details_17.entity_id
-LEFT JOIN civicrm_option_value ON civicrm_option_value.value = civicrm_event.event_type_id
-LEFT JOIN civicrm_option_group ON civicrm_option_value.option_group_id = civicrm_option_group.id
+FROM civicrm_contribution civicrm_contribution
 LEFT JOIN civicrm_account_invoice ci ON civicrm_contribution.id = ci.contribution_id
 
-WHERE civicrm_participant.register_date >= '2013-11-21 19:38:08'
-AND civicrm_option_group.name = 'event_type'
+WHERE civicrm_contribution.receive_date >= '2014-01-01'
 AND civicrm_contribution.id is not null
 AND civicrm_contribution.contribution_status_id <> 3
 AND ci.contribution_id IS NULL
@@ -70,54 +62,12 @@ function _civiaccountsync_invoice_create($accountsObject, $value) {
 
   $xero = new CRM_Xerosync_Invoice();
   $contributionID = $value['id'];
-  try{
-  // ok this chaining is a bit heavy but it would be good to work towards API returning this more efficiently
-  // ie. not keen on the fact you can't easily get line items for contributions related to participants
-  // & TBH the communication with Xero takes 90% of the script time ...
-  // @todo - set return properties on contribution.get
-  $contribution = civicrm_api3('contribution', 'getsingle', array(
-    'api.line_item.get' => 1, 'id' => $contributionID,
-    'api.participant_payment.get' => array(
-      'return' => 'api.participant., participant_id',
-      'api.participant.get' => array(
-        'api.line_item.get' => 1,
-        'return' => 'participant_source, event_id, financial_type_id',
-      )
-    )
-  ));
-  if($contribution['api.line_item.get']['count']) {
-    $contribution['line_items'] = $contribution['api.line_item.get']['values'];
-  }
-  else {
-    //we'll keep the participant record for anyone trying to do hooks
-    $contribution['participant'] = $contribution['api.participant_payment.get']['values'][0]['api.participant.get']['values'][0];
-    $contribution['line_items'] = $contribution['participant']['api.line_item.get']['values'];
-    //if muliple participants one line item each
-    _getAdditionalParticipanLineItems($contribution);
-  }
-  foreach ($contribution['line_items'] as &$lineItem) {
-    $lineItem['accounting_code'] = CRM_Financial_BAO_FinancialAccount::getAccountingCode($lineItem['financial_type_id']);
-    if(!isset($lineItem['contact_id'])) {
-      //this would have been set for a secondary participant above so we are ensuring primary ones have it
-      // for conformity & ease downstream
-      $lineItem['contact_id'] = $contribution['contact_id'];
-    }
-    if(!isset($lineItem['display_name'])) {
-      //this would have been set for a secondary participant above so we are ensuring primary ones have it
-      // for conformity & ease downstream
-      $lineItem['display_name'] = $contribution['display_name'];
-    }
-  }
-  //@todo move the getAccountingCode to a fn that caches it
-  $contribution['accounting_code'] = CRM_Financial_BAO_FinancialAccount::getAccountingCode($contribution['financial_type_id']);
-  }
-  catch(Exception $e) {
-    dpm($e, $e->getMessage());
-  }
-
-  $new_invoice = $xero->mapToAccounts($contribution, NULL);
-
+  $invoice = civicrm_api3('account_invoice', 'getderived', array('id' => $contributionID));
+  dpm($invoice);
+  $new_invoice = $xero->mapToAccounts($invoice['values'][$contributionID], NULL);
+dpm($new_invoice);
   $invoice_result = $accountsObject->Invoices ($new_invoice);
+  dpm($invoice_result);
   $errors = civicaccountsync_civixero_validate_response($invoice_result ) ;
   if (is_array($errors)){
     drupal_set_message("<pre>".print_r($errors,true)." for invoice $value[contribution_id] for contact $value[contact_id] : $value[display_name]</pre>");
@@ -268,31 +218,6 @@ function civicaccountsync_invoice_cancel_inCivi($xero){
   }
 }
 
-/*
-   * Get Line items for invoice. At this stage only secondary participants are being fetched here
-   * @param array $invoice Invoice array being prepared for Xero
-   * @return array $lineitems if there are some else null
-   */
-function _getAdditionalParticipanLineItems(&$invoice) {
-  $rowsTotal = 0;
-  foreach ($invoice['line_items'] as $line_item) {
-    $rowsTotal .= $line_item['line_total'];
-  }
-
-  if ($invoice['total_amount'] > $rowsTotal) {
-    // api let us down use direct sql
-    // @TODO get api to accept the below
-    //  $otherParticipants = civicrm_api('Participant','Get',array('version' =>3,'participant_registered_by_id' =>$invoice['participant_id']));
-    $sql = "SELECT p.id, contact_id, display_name FROM civicrm_participant p
-      LEFT JOIN civicrm_contact c ON c.id = p.contact_id
-      WHERE registered_by_id = %1";
-    $dao = CRM_Core_DAO::executeQuery($sql, array(1 => array($invoice['participant']['id'], 'Integer')));
-    while ($dao->fetch()) {
-      $lineitems = civicrm_api3('line_item', 'get', array('sequential' => 1, 'entity_id' => $dao->id, 'entity_table' => 'civicrm_participant'));
-      $invoice['line_items'][] = array_merge($lineitems['values'][0], array('contact_id' => $dao->contact_id, 'display_name' => $dao->display_name));
-    }
-  }
-}
 
 /*
    * Update the participant fee amount to reflect the amount actually paid. This
