@@ -3,14 +3,23 @@
 
 
 /*
- *   get invoices from Accounts & store / update them in cas_invoices
+ *   get invoices from Accounts & store / update them in civicrm_account_invoice
  *   use 'civixero_lastxeroinvoiceget' to control date range
  *
  */
 function civiaccountsync_invoice_pull($accountsObject) {
+  $last_run = variable_get('civixero_lastxeroinvoiceget', 0);
+  if ($last_run > strtotime('2 days ago')) {
+    //we will get a min of 2 days to be sure ...
+    $last_run = strtotime('2 days ago');
+  }
+  $params = array(
+    'start_date' => date("Y-m-d H:m:s", $last_run),
+  );
+  $result = civicrm_api3('xerosync', 'invoicepull', $params);
+  return;
   $from_date = date_convert(variable_get ( 'civixero_lastxeroinvoiceget', strtotime('last year')), DATE_UNIX, DATE_ISO);
-  $table = 'cas_invoices';
-
+  $table = 'civicrm_account_invoice';
 
   $result = $accountsObject->Invoices ( false, $from_date, array ("Type" => "ACCREC" ) );
 
@@ -18,7 +27,7 @@ function civiaccountsync_invoice_pull($accountsObject) {
     foreach ( $result ['Invoices'] ['Invoice'] as $invoice ) {
       unset ( $update );
       $record = new stdClass ();
-      $cas_iid = db_result ( db_query ( "SELECT cas_iid FROM {cas_invoices} WHERE civicrm_iid > 0 AND acc_iid = '%s'", $invoice ['InvoiceID'] ) );
+      $cas_iid = db_result ( db_query ( "SELECT cas_iid FROM civicrm_account_invoice WHERE civicrm_iid > 0 AND acc_iid = '%s'", $invoice ['InvoiceID'] ) );
       if (! empty ( $cas_iid )) {
         $update = 'cas_iid';
         $record->cas_iid = $cas_iid;
@@ -69,7 +78,7 @@ function civiaccountsync_invoice_pull($accountsObject) {
  * @$accObject
  */
 function civiaccountsync_invoice_push($accObject) {
-  //todo  - how best to restructure this? I need an sql contribution vs cas_invoices but
+  //todo  - how best to restructure this? I need an sql contribution vs civicrm_accountinvoice but
   //what other info do I get in the same sql & what do I get using API?
   $sql = "
 SELECT civicrm_participant.id AS participant_id,
@@ -86,38 +95,37 @@ civicrm_value_event_details_17.programme_81 AS programme,
 civicrm_contact.external_identifier,  civicrm_participant.register_date AS register_date,
 civicrm_participant.registered_by_id ,civicrm_participant.fee_amount as participant_fee_amount
 
-FROM {civicrm_participant} civicrm_participant
-LEFT JOIN {civicrm_contact} civicrm_contact ON civicrm_participant.contact_id = civicrm_contact.id
-LEFT JOIN {civicrm_participant_payment} civicrm_participant_payment ON civicrm_participant.id = civicrm_participant_payment.participant_id
-LEFT JOIN {civicrm_contribution} civicrm_contribution ON civicrm_participant_payment.contribution_id = civicrm_contribution.id
-LEFT JOIN {civicrm_event} civicrm_event ON civicrm_participant.event_id = civicrm_event.id
-LEFT JOIN {civicrm_value_event_details_17} civicrm_value_event_details_17 ON civicrm_event.id = civicrm_value_event_details_17.entity_id
-LEFT JOIN {civicrm_option_value} ON civicrm_option_value.value = civicrm_event.event_type_id
-LEFT JOIN {civicrm_option_group} ON civicrm_option_value.option_group_id = civicrm_option_group.id
-LEFT JOIN {cas_invoices} ci ON civicrm_contribution.id = ci.civicrm_iid
+FROM civicrm_participant civicrm_participant
+LEFT JOIN civicrm_contact civicrm_contact ON civicrm_participant.contact_id = civicrm_contact.id
+LEFT JOIN civicrm_participant_payment civicrm_participant_payment ON civicrm_participant.id = civicrm_participant_payment.participant_id
+LEFT JOIN civicrm_contribution civicrm_contribution ON civicrm_participant_payment.contribution_id = civicrm_contribution.id
+LEFT JOIN civicrm_event civicrm_event ON civicrm_participant.event_id = civicrm_event.id
+LEFT JOIN civicrm_value_event_details_17 civicrm_value_event_details_17 ON civicrm_event.id = civicrm_value_event_details_17.entity_id
+LEFT JOIN civicrm_option_value ON civicrm_option_value.value = civicrm_event.event_type_id
+LEFT JOIN civicrm_option_group ON civicrm_option_value.option_group_id = civicrm_option_group.id
+LEFT JOIN civicrm_account_invoice ci ON civicrm_contribution.id = ci.contribution_id
 
-WHERE civicrm_participant.register_date >= '2013-07-21 19:38:08'
+WHERE civicrm_participant.register_date >= '2013-11-21 19:38:08'
 AND civicrm_option_group.name = 'event_type'
 AND civicrm_contribution.id is not null
 AND civicrm_contribution.contribution_status_id <> 3
-AND ci.civicrm_iid IS NULL
+AND ci.contribution_id IS NULL
 ORDER BY civicrm_contribution.id
-
-
 ";
+
    // module_invoke_all('invoice_prerequisites',$invoice,$accObject);
   $count = 0;
-  $array = db_fetch_array ( db_query ( $sql ) );
-  $result = db_query ( $sql );
-  while ( $invoice = db_fetch_array ( $result ) ) {
+  $dao = CRM_Core_DAO::executeQuery($sql);
+  while ($dao->fetch()) {
    $errors = array();
-   $errors =  module_invoke_all('invoice_prerequisites',$invoice,$accObject);
+   $invoice = (array) $dao;
+   $errors =  module_invoke_all('invoice_prerequisites',$invoice, $accObject);
    if(!empty($errors)){
      drupal_set_message("<pre>". print_r($errors,true). "</pre>");
      return;
    }
     //if muliple participants one line item each
-    $invoice ['line_items'] = _getLineItems ( $invoice );
+    $invoice ['line_items'] = _getLineItems( $invoice );
 
     //cc denotes 'is credit card' & is pre-pended to cretid card description in Xero
     $cc = "";
@@ -204,7 +212,7 @@ function _civiaccountsync_invoice_create($accountsObject, $value, $cc = null, $a
     $record->acc_status = 2;
     $record->acc_last_mod = strtotime ( 'now' );
     $record->acc_amount = $value ['total_amount'];
-    drupal_write_record ( 'cas_invoices', $record );
+    drupal_write_record ( 'civicrm_account_invoice', $record );
     drupal_set_message("created invoice ". $value ['contribution_id'] . " for " . $value ['display_name']);
 
 
@@ -221,38 +229,37 @@ function civiaccountsync_invoice_complete_paid($accountsObject) {
   require_once "api/api.php";
 
   //get pending registrations
-  $sql = "SELECT civicrm_iid, civicrm_amount, acc_amount, cas_iid,acc_last_mod
-          FROM {cas_invoices} cas
-          LEFT JOIN {civicrm_contribution}  civi ON cas.civicrm_iid = civi.id
-          WHERE civi.contribution_status_id =2
-          AND `acc_status` =1
-         ";
+  $sql = "
+    SELECT contribution_id, accounts_invoice_id, accounts_modified_date, cas.id
+    FROM civicrm_account_invoice cas
+    LEFT JOIN civicrm_contribution  civi ON cas.contribution_id = civi.id
+    WHERE civi.contribution_status_id =2
+    AND accounts_status_id =1
+   ";
+  $dao = CRM_Core_DAO::executeQuery($sql);
 
-  $cxresult = db_query ( $sql );
 
-  while ( $data = db_fetch_object ( $cxresult ) ) {
-    $params ['contribution_id'] = $data->civicrm_iid;
+  while ($dao->fetch()) {
+    $params ['contribution_id'] = $dao->contribution_id;
     $params ['version'] = '3';
     $params ['return.total_amount'] = 1;
     $params ['return.contact_id'] = 1;
     $params ['return.contribution_id'] = 1;
     $params ['return.receive_date'] = 1;
     $contribution = civicrm_api ( 'Contribution', 'Get', $params );
-    $amount = $contribution ['values'] [$params ['contribution_id']] ['total_amount'];
+    $amount = $contribution['values'][$params ['contribution_id']]['total_amount'];
 
-    //TODO implement this as api call - no participant_payment_get yet
-    $participantID = db_result ( db_query ( "SELECT participant_id from {civicrm_participant_payment} where contribution_id = " . $data->civicrm_iid ) );
+    $participantArr = civicrm_api3('participant_payment', 'getsingle', array(
+      'contribution_id' => $dao->contribution_id,
+      'api.participant.getsingle' => 1,
+    ));
+    $participant = $participantArr['api.participant.getsingle'];
+    // we were altering the amount if a different amount was paid but not so sure this is ok now
+  //  if ($amount != $participant_result['values'][$participantID]['participant_fee_amount'] && $amount != $data->civicrm_amount) {
+  //    _updateParticipantFeeAmount ( $participantID, $amount );
+  //  }
 
-    //TODO but no time soon! can't return_participant_fee_amount because api drops it
-    $participant_params = array ('version' => '3', 'participant_id' => $participantID );
-    $participant_result = civicrm_api ( 'participant', 'Get', $participant_params );
-    if ($amount != $participant_result['values'][$participantID]['participant_fee_amount'] && $amount != $data->civicrm_amount) {
-      _updateParticipantFeeAmount ( $participantID, $amount );
-    }
-
-    require_once 'CRM/Core/Payment/BaseIPN.php';
     $baseIPN = new CRM_Core_Payment_BaseIPN ();
-    require_once 'CRM/Core/Transaction.php';
     $transaction = new CRM_Core_Transaction ();
 
     $input ['component'] = 'event';
@@ -262,25 +269,16 @@ function civiaccountsync_invoice_complete_paid($accountsObject) {
     $input ['is_test'] = 0;
     $input ['fee_amount'] = 0;
     $input ['payment_instrument_id'] = 5; // per - civicrm/admin/options/payment_instrument&group=payment_instrument&reset=1
-    $input ['receive_date'] = date ( 'Y-m-d', $data->acc_last_mod );
+    $input ['receive_date'] = $dao->accounts_modified_date;
     $ids ['contact'] = $contribution ['values'] [$params ['contribution_id']] ['contact_id'];
     $ids ['contribution'] = $contribution ['id'];
-    $ids ['participant'] = $participantID;
-    $ids ['event'] = $participant_result ['values'] [$participantID] ['event_id'];
-
+    $ids ['participant'] = $participant['id'];
+    $ids ['event'] = $participant['event_id'];
+    $objects = array();
     if (! $baseIPN->validateData ( $input, $ids, $objects, false )) {
       CRM_Core_Error::fatal('could not validate');
     }
     $baseIPN->completeTransaction ( $input, $ids, $objects, $transaction, false );
-
-
-    $table = 'cas_invoices';
-    $record = new stdClass ();
-    $record->civicrm_iid = $data->civicrm_iid;
-    $record->cas_iid = $data->cas_iid;
-    $record->civicrm_status = 1;
-    drupal_write_record ( $table, $record, 'cas_iid' );
-
   }
 
 }
@@ -343,8 +341,6 @@ function civicaccountsync_invoice_cancel_inCivi($xero){
 
   $result = db_query ( $sql );
   while ( $data = db_fetch_object ( $result ) ) {
-
-    require_once "api/api.php";
     $getresult = civicrm_api('Contribution','Get',array('contribution_id' => $data->civicrm_iid, 'version' =>3,'sequential' =>1) );
     $params = $getresult['values'][0];
     $params['version'] =3;
@@ -417,7 +413,7 @@ function _updateParticipantFeeAmount($participantID, $amount) {
           WHERE registered_by_id = %d";
     $result = db_query ( $sql, $participantID );
     while ( $reldata = db_fetch_object ( $result ) ) {
-      drupal_set_message ( "The amount paid for this invoice has changed. Changing invoices with more than one line item not currently supported in CiviAccountSync<pre>" . print_r ( $invoice, true ) . "</pre>" );
+      drupal_set_message ( "The amount paid for this invoice has changed. Changing invoices with more than one line item not currently supported in CiviAccountSync<pre></pre>" );
 
     }
 

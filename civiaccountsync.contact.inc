@@ -18,7 +18,12 @@ function civiaccountsync_contact_pull($xero){
   $params = array(
     'start_date' => date("Y-m-d H:m:s", $last_run),
   );
-  $result = civicrm_api3('xerosync', 'contactpull', $params);
+  try {
+    $result = civicrm_api3('xerosync', 'contactpull', $params);
+  }
+  catch (Exception $e) {
+    drupal_set_message($e->getMessage());
+  }
   //set now as last synced time
   variable_set('civixero_lastxerocontactget', strtotime('now'));
 }
@@ -31,11 +36,12 @@ function civiaccountsync_contact_push($accountsObject){
   $plugin = 'xero';
   try {
     $result = civicrm_api3('xerosync', 'contactpush', array());
+    $result = _getCiviCRMContactstoUpdate();
   }
-  catch (Exception $e) {
+  catch (CiviCRM_API3_Exception $e) {
     dpm($e->getMessage());
+
   }
-  $result = _getCiviCRMContactstoUpdate();
   variable_set('civixero_lastcivicontactput', strtotime('now'));
 }
 
@@ -68,9 +74,10 @@ function _getCiviCRMContactstoUpdate($count = 0){
       $contactIDS[$contribution['contact_id']] = 1;
       $accountContact = array('contact_id' => $contribution['contact_id'], 'accounts_needs_update' => 1);
       try {
-        $accountContact['id'] = civicrm_api3('account_contact', 'getvalue', array('return' => 'id', 'contact_id' => $contribution['contact_id']));
+        $accountContact['id'] = civicrm_api3('account_contact', 'getvalue', array('plugin' => 'xero', 'return' => 'id', 'contact_id' => $contribution['contact_id']));
       }
       catch (CiviCRM_API3_Exception $e) {
+        drupal_set_message($e->getMessage());
         // new contact
       }
       $accountContact['plugin'] = 'xero';
