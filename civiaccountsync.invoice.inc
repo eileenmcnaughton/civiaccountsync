@@ -17,58 +17,8 @@ function civiaccountsync_invoice_pull($accountsObject) {
     'start_date' => date("Y-m-d H:m:s", $last_run),
   );
   $result = civicrm_api3('xerosync', 'invoicepull', $params);
-  return;
-  $from_date = date_convert(variable_get ( 'civixero_lastxeroinvoiceget', strtotime('last year')), DATE_UNIX, DATE_ISO);
-  $table = 'civicrm_account_invoice';
-
-  $result = $accountsObject->Invoices ( false, $from_date, array ("Type" => "ACCREC" ) );
-
-  if ($result ['Invoices']) {
-    foreach ( $result ['Invoices'] ['Invoice'] as $invoice ) {
-      unset ( $update );
-      $record = new stdClass ();
-      $cas_iid = db_result ( db_query ( "SELECT cas_iid FROM civicrm_account_invoice WHERE civicrm_iid > 0 AND acc_iid = '%s'", $invoice ['InvoiceID'] ) );
-      if (! empty ( $cas_iid )) {
-        $update = 'cas_iid';
-        $record->cas_iid = $cas_iid;
-      }
-      if (empty ( $invoice ['InvoiceNumber'] )) {
-        echo "<p>result w no invoice number - this shouldn't happen</p><pre>";
-        print_r ( $result );
-        echo "</pre>";
-      }
-      //Completed   1
-      // Pending     2
-      // Cancelled   3
-      Switch ($invoice ['Status']) {
-        case 'PAID' :
-          $invoice ['Status'] = 1;
-          break;
-        case 'DELETED' :
-        case 'VOIDED' :
-        case 'DRAFT' :
-          $invoice ['Status'] = 3;
-          break;
-        case 'AUTHORISED' :
-        case 'SUBMITTED' :
-          $invoice ['Status'] = 2;
-          break;
-      }
-      $record->acc_status = $invoice ['Status'];
-      $record->civicrm_iid = $invoice ['InvoiceNumber'];
-      $record->acc_iid = $invoice ['InvoiceID'];
-      $record->acc_last_mod = strtotime ( $invoice ['UpdatedDateUTC'] );
-      $record->acc_amount = $invoice ['Total'];
-      drupal_write_record ( $table, $record, $update );
-      unset ( $update );
-
-    }
-  }
-  //I'm sure this could be more elegant but to avoid server time issues just set last sync date to yesterday since
-  //volume isn't such that a day repeats matters & otherwise timezone stuff needs to be right on the ball in code & on the server
-  $yesterday = mktime(0, 0, 0, date("m") , date("d") - 1, date("Y"));
   //set now as last synced time
-  variable_set ( 'civixero_lastxeroinvoiceget', strtotime('now'));
+  variable_set ( 'civixero_lastxeroinvoiceget', 'now');
 }
 
 /*
@@ -292,11 +242,11 @@ function civiaccountsync_invoice_complete_paid($accountsObject) {
 function civiaccountsync_invoice_push_cancel($accountsObject) {
 
   //get pending registrations
-  $sql = "SELECT civicrm_iid, civicrm_amount, acc_amount, cas_iid,acc_iid
-          FROM {cas_invoices} cas
-          LEFT JOIN {civicrm_contribution}  civi ON cas.civicrm_iid = civi.id
-          WHERE civi.contribution_status_id =3
-          AND `acc_status` =2";
+  $sql = "SELECT contribution_id, cas.id, cas.accounts_invoice_id
+    FROM civicrm_account_invoice cas
+    LEFT JOIN civicrm_contribution  civi ON cas.contribution_id = civi.id
+    WHERE civi.contribution_status_id =3
+    AND accounts_status_id = 2";
 
   $cxresult = db_query ( $sql );
   while ( $data = db_fetch_object ( $cxresult ) ) {
@@ -304,8 +254,8 @@ function civiaccountsync_invoice_push_cancel($accountsObject) {
     $cancelledInvoice = array(
 
         'Invoice' => array(
-          'InvoiceID'     => $data->acc_iid,
-          'InvoiceNumber' => $data->civicrm_iid,
+          'InvoiceID'     => $data->accounts_invoice_id,
+          'InvoiceNumber' => $data->contribution_id,
           'Type'          => 'ACCREC',
           'Reference' =>  'Cancelled',
           'Date'  => date('Y-m-d',strtotime(now)),
@@ -333,28 +283,20 @@ function civiaccountsync_invoice_push_cancel($accountsObject) {
 
 function civicaccountsync_invoice_cancel_inCivi($xero){
   //get pending registrations
-  $sql = "SELECT civicrm_iid, civicrm_amount, acc_amount, cas_iid
-          FROM {cas_invoices} cas
-          LEFT JOIN {civicrm_contribution}  civi ON cas.civicrm_iid = civi.id
-          WHERE civi.contribution_status_id =2
-          AND `acc_status` =3";
+  $sql = "SELECT  cas.contribution_id
+    FROM civicrm_account_invoice cas
+    LEFT JOIN civicrm_contribution  civi ON cas.contribution_id = civi.id
+    WHERE civi.contribution_status_id =2
+    AND accounts_status_id =3
+  ";
+  $dao = CRM_Core_DAO::executeQuery($sql);
 
-  $result = db_query ( $sql );
-  while ( $data = db_fetch_object ( $result ) ) {
-    $getresult = civicrm_api('Contribution','Get',array('contribution_id' => $data->civicrm_iid, 'version' =>3,'sequential' =>1) );
-    $params = $getresult['values'][0];
-    $params['version'] =3;
+  while ($dao->fetch()) {
     $params['contribution_status_id'] = 3;
-    $params['id'] = $getresult['id'];
-
-    $addresult = civicrm_api('Contribution','Create',$params) ;
+    $params['id'] = $dao->contribution_id;
+    civicrm_api3('Contribution','Create',$params) ;
   }
-
-
 }
-
-
-
 
 /*
    * Get Line items for invoice. At this stage only secondary participants are being fetched here
@@ -362,7 +304,7 @@ function civicaccountsync_invoice_cancel_inCivi($xero){
    * @return array $lineitems if there are some else null
    */
 function _getLineItems(&$invoice) {
-  if ($invoice ['total_amount'] > $invoice ['participant_fee_amount']) {
+  if ($invoice ['total_amount']-> $invoice ['participant_fee_amount']) {
     require_once 'api/api.php';
     // api let us down use direct sql
     // TODO get api to accept the below
