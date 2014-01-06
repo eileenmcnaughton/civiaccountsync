@@ -139,10 +139,6 @@ function civiaccountsync_form_dashboard(){
     '#title' => t('Pull Contacts from Accounts Package. Last done on ' . date("Y-m-d H:m:s",variable_get('civixero_lastxerocontactget',0))),
     '#default_value' => 1,
   );
-  if(($contactsUpdateCount = _getCiviCRMContactstoUpdate(1))>0){
-    $generateContactstoUpdate = ' Required for ' . $contactsUpdateCount ." contacts" . $generateContactstoUpdate;
-  }
-
   $form['civiaccountsync_contact_push']= array(
     '#type' => 'checkbox',
     '#title' => t('Push contacts details to Accounts Package (for contacts with pending invoices  )' ),
@@ -192,7 +188,9 @@ function civiaccountsync_form_dashboard(){
  * implement form submit to process actions
  */
 function civiaccountsync_form_dashboard_submit($form,&$form_state){
-
+  if(!civicrm_initialize()) {
+    return;
+  }
   module_load_include('inc','civiaccountsync','civiaccountsync.queries');
   $accountsObj = civiaccountsync_init();
   foreach ($form_state['values'] as $value => $key) {

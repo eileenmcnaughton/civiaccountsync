@@ -10,9 +10,13 @@
  */
 
 function civiaccountsync_contact_pull($xero){
-  $plugin = 'xero';
+  $last_run = variable_get('civixero_lastxerocontactget', 0);
+  if ($last_run > strtotime('2 days ago')) {
+    //we will get a min of 2 days to be sure ...
+    $last_run = strtotime('2 days ago');
+  }
   $params = array(
-    'start_date' => date("Y-m-d H:m:s", variable_get('civixero_lastxerocontactget', 0)),
+    'start_date' => date("Y-m-d H:m:s", $last_run),
   );
   $result = civicrm_api3('xerosync', 'contactpull', $params);
   //set now as last synced time
@@ -25,25 +29,14 @@ function civiaccountsync_contact_pull($xero){
  */
 function civiaccountsync_contact_push($accountsObject){
   $plugin = 'xero';
-  $result = _getCiviCRMContactstoUpdate();
-
-  foreach($result['values'] as $contribution){
-    try {
-    $accountsContactID = civicrm_api3('account_contact', 'getvalue', array(
-      'return' => 'accounts_contact_id',
-      'contact_id' => $contribution['contact_id'],
-      'plugin' => $plugin,
-    ));
-    }
-    catch (CiviCRM_API3_Exception $e) {
-      //we are creating a new contact - but we should add an option to update only or so review new contacts
-    }
-    $civiCRMcontact  = _getContactDetailsFromCivi($contribution['contact_id']);
-    $accountsContact = _civiaccountsync_contact_mapCiviCRMParamstoAccountsParams($civiCRMcontact, $accountsContactID);
-
-    $accountsObject->Contacts( $accountsContact );
+  try {
+    $result = civicrm_api3('xerosync', 'contactpush', array());
   }
-  variable_set('civixero_lastcivicontactput',strtotime('now'));
+  catch (Exception $e) {
+    dpm($e->getMessage());
+  }
+  $result = _getCiviCRMContactstoUpdate();
+  variable_set('civixero_lastcivicontactput', strtotime('now'));
 }
 
 /*
@@ -57,66 +50,32 @@ function _getCiviCRMContactstoUpdate($count = 0){
     if ( ! civicrm_initialize( ) ) {
         return;
     }
-
     $lastUpdate = date("Y-m-d",(int) variable_get('civixero_lastcivicontactput','0'));
     $params['contribution_status_id'] =2;
     $params['modified_date_low']= $lastUpdate;
+    $params['options'] = array('limit' => 50, 'sort' => 'id DESC');
  //   $params['sort'] = 'civicrm_log.modified_date ASC';
     //TODO - currently code assumes that 1000 contributions is enough to bring it up-do-date & set last sync to current date
     $params['rowCount'] = 50;
-    $params['version'] =3;
-    $result = civicrm_api('Contribution','Get',$params);
+
+    $result = civicrm_api3('Contribution','Get',$params);
+    $contactIDS = array();
+    foreach ($result['values'] as $contribution) {
+      if(!empty($contactIDS[$contribution['contact_id']])) {
+        // lets save ourselves a few look-ups
+        continue;
+      }
+      $contactIDS[$contribution['contact_id']] = 1;
+      $accountContact = array('contact_id' => $contribution['contact_id'], 'accounts_needs_update' => 1);
+      try {
+        $accountContact['id'] = civicrm_api3('account_contact', 'getvalue', array('return' => 'id', 'contact_id' => $contribution['contact_id']));
+      }
+      catch (CiviCRM_API3_Exception $e) {
+        // new contact
+      }
+      $accountContact['plugin'] = 'xero';
+      civicrm_api3('account_contact', 'create', $accountContact);
+    }
     return $result;
 }
 
-/*
- * Get contact Details out of CiviCRM
- */
-
-function _getContactDetailsFromCivi($contactID){
-
-  $params = array('id'  => $contactID,
-                   'version'  => 3,);
-  $contact = civicrm_api('Contact', 'Get', $params);
-  return($contact['values'][$contact['id']]);
-
-}
-
-/*
- * Map civicrm Array to Accounts package field names
- * @param array $contact Contact Array as returned from API
- * @param string  accountsID ID from Accounting system
- * @return $accountsContact Contact Object/ array as expected by accounts package
- */
-function _civiaccountsync_contact_mapCiviCRMParamstoAccountsParams($contact, $accountsID){
-  $new_contact = array(
-    array(
-        "Name" => $contact['display_name'],
-        "FirstName" => $contact['first_name'],
-        "LastName" => $contact['last_name'],
-        "EmailAddress" => $contact['email'],
-        "ContactNumber" => $contact['contact_id'],
-        "Addresses" => array(
-            "Address" => array(
-                array(
-                    "AddressType" => 'POBOX',//described in documentation as the default mailing address for invoices http://blog.xero.com/developer/api/types/#Addresses
-                    "AddressLine1" => $contact['street_address'],
-                    "City" => $contact['city'],
-                    "PostalCode" => $contact['postal_code'],
-                ),
-
-            )
-        ),
-        "Phones"  => array(
-              "Phone" => array("PhoneType" => 'DEFAULT',
-                             "PhoneNumber" => $contact['phone'],
-                            ),
-        )
-    )
-);
-  if (!empty($accountsID)){
-    $new_contact['contactID'] = $accountsID;
-  }
-
-return $new_contact ;
-}
