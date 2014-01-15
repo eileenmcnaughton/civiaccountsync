@@ -7,7 +7,7 @@
  *   use 'civixero_lastxeroinvoiceget' to control date range
  *
  */
-function civiaccountsync_invoice_pull($accountsObject) {
+function civiaccountsync_invoice_pull() {
   $last_run = variable_get('civixero_lastxeroinvoiceget', 0);
   if ($last_run > strtotime('2 days ago')) {
     //we will get a min of 2 days to be sure ...
@@ -16,7 +16,12 @@ function civiaccountsync_invoice_pull($accountsObject) {
   $params = array(
     'start_date' => date("Y-m-d H:m:s", $last_run),
   );
+  try {
   $result = civicrm_api3('xerosync', 'invoicepull', $params);
+  }
+  catch (Exception $e) {
+    drupal_set_message('Sync completed but not on all invoices ' . $e->getMessage());
+  }
   //set now as last synced time
   variable_set ( 'civixero_lastxeroinvoiceget', strtotime('now'));
 }
@@ -27,7 +32,7 @@ function civiaccountsync_invoice_pull($accountsObject) {
  *
  * @$accObject
  */
-function civiaccountsync_invoice_push($accObject) {
+function civiaccountsync_invoice_push() {
   //todo  - how best to restructure this? I need an sql contribution vs civicrm_accountinvoice but
   //what other info do I get in the same sql & what do I get using API?
   $sql = "
@@ -47,46 +52,15 @@ ORDER BY civicrm_contribution.id
   $dao = CRM_Core_DAO::executeQuery($sql);
 
   while ($dao->fetch()) {
-   $invoice = (array) $dao;
-    _civiaccountsync_invoice_create($accObject, $invoice);
-    return;
-    $count++;
+   civicrm_api3('account_invoice', 'create', array('contribution_id' => $dao->id, 'plugin' => 'xero', 'accounts_needs_update' => 1));
   }
-    if(!empty($count)){
-      drupal_set_message(t("$count invoices were created"));
-    }
-    variable_set ( 'civixero_lastxeroinvoiceput', strtotime('now'));
+  _civiaccountsync_invoice_create();
+   variable_set ( 'civixero_lastxeroinvoiceput', strtotime('now'));
 }
 
-function _civiaccountsync_invoice_create($accountsObject, $value) {
-
-  $xero = new CRM_Xerosync_Invoice();
-  $contributionID = $value['id'];
-  $invoice = civicrm_api3('account_invoice', 'getderived', array('id' => $contributionID));
-  dpm($invoice);
-  $new_invoice = $xero->mapToAccounts($invoice['values'][$contributionID], NULL);
-dpm($new_invoice);
-  $invoice_result = $accountsObject->Invoices ($new_invoice);
-  dpm($invoice_result);
-  $errors = civicaccountsync_civixero_validate_response($invoice_result ) ;
-  if (is_array($errors)){
-    drupal_set_message("<pre>".print_r($errors,true)." for invoice $value[contribution_id] for contact $value[contact_id] : $value[display_name]</pre>");
-    return $errors;
-  }
-
-    $record = new stdClass ();
-    $record->acc_iid = $invoice_result ['Id'];
-    $record->civicrm_iid = $value ['contribution_id'];
-    $record->status = $value ['contribution_status_id'];
-    $record->civicrm_amount = $value ['total_amount'];
-    $record->acc_status = 2;
-    $record->acc_last_mod = strtotime ( 'now' );
-    $record->acc_amount = $value ['total_amount'];
-    drupal_write_record ( 'civicrm_account_invoice', $record );
-    drupal_set_message("created invoice ". $value ['contribution_id'] . " for " . $value ['display_name']);
-
-
-
+function _civiaccountsync_invoice_create() {
+  civicrm_api3('xerosync', 'invoicepush', array('plugin' => 'xero'));
+  return;
 }
 
 /*
@@ -95,8 +69,7 @@ dpm($new_invoice);
  * @param object $accountsObject Accounts package object
  */
 
-function civiaccountsync_invoice_complete_paid($accountsObject) {
-  require_once "api/api.php";
+function civiaccountsync_invoice_complete_paid() {
 
   //get pending registrations
   $sql = "
@@ -124,10 +97,6 @@ function civiaccountsync_invoice_complete_paid($accountsObject) {
       'api.participant.getsingle' => 1,
     ));
     $participant = $participantArr['api.participant.getsingle'];
-    // we were altering the amount if a different amount was paid but not so sure this is ok now
-  //  if ($amount != $participant_result['values'][$participantID]['participant_fee_amount'] && $amount != $data->civicrm_amount) {
-  //    _updateParticipantFeeAmount ( $participantID, $amount );
-  //  }
 
     $baseIPN = new CRM_Core_Payment_BaseIPN ();
     $transaction = new CRM_Core_Transaction ();
@@ -167,9 +136,8 @@ function civiaccountsync_invoice_push_cancel($accountsObject) {
     LEFT JOIN civicrm_contribution  civi ON cas.contribution_id = civi.id
     WHERE civi.contribution_status_id =3
     AND accounts_status_id = 2";
-
-  $cxresult = db_query ( $sql );
-  while ( $data = db_fetch_object ( $cxresult ) ) {
+  $data = CRM_Core_DAO::executeQuery($sql);
+  while ($data->fetch()) {
 
     $cancelledInvoice = array(
 
@@ -201,7 +169,7 @@ function civiaccountsync_invoice_push_cancel($accountsObject) {
  * Cancel pending invoices in CiviCRM based on them being cancelled in the accounts package
  */
 
-function civicaccountsync_invoice_cancel_inCivi($xero){
+function civicaccountsync_invoice_cancel_inCivi(){
   //get pending registrations
   $sql = "SELECT  cas.contribution_id
     FROM civicrm_account_invoice cas
@@ -215,42 +183,6 @@ function civicaccountsync_invoice_cancel_inCivi($xero){
     $params['contribution_status_id'] = 3;
     $params['id'] = $dao->contribution_id;
     civicrm_api3('Contribution','Create',$params) ;
-  }
-}
-
-
-/*
-   * Update the participant fee amount to reflect the amount actually paid. This
-   * allows the administrator to change the invoice in the accounts package to
-   * reflect an agreement & have the change flow back to the participant record
-   * As of writing it is not possible to change a participant fee amount through CiviCRM without
-   * using SQL
-   *
-   * Not implemented for multiple participants yet
-   */
-function _updateParticipantFeeAmount($participantID, $amount) {
-  //find out whether there is one or more line items. A count greater than 0 indicates more than one
-  $sql = "SELECT count(id)
-          FROM {civicrm_participant}
-          WHERE registered_by_id = %d";
-  $count = db_result ( db_query ( $sql, $participantID ) );
-  if (empty ( $count )) {
-    $sql = "UPDATE
-         {civicrm_participant}
-         SET fee_amount = %d
-         WHERE id = %d";
-        $result = db_query ( $sql, $amount,$participantID  );
-  } else {
-
-    $sql = "SELECT id
-          FROM {civicrm_participant}
-          WHERE registered_by_id = %d";
-    $result = db_query ( $sql, $participantID );
-    while ( $reldata = db_fetch_object ( $result ) ) {
-      drupal_set_message ( "The amount paid for this invoice has changed. Changing invoices with more than one line item not currently supported in CiviAccountSync<pre></pre>" );
-
-    }
-
   }
 }
 
